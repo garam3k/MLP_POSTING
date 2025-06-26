@@ -2,11 +2,9 @@
 import time
 from typing import Optional, List, Tuple
 
-# config.py에서 필요한 모든 클래스와 상수를 임포트합니다.
 from config import (WindowConfig, ScrollCheckConfig, INVEN_SCAN_TARGET_IMAGE_PATH,
-                    GLOBAL_CONFIDENCE, CLICK_DELAY_SECONDS, INVEN_CONFIG, INVEN_SCROLL_CONFIG)
-
-from grid_cell_utils import get_grid_cell_coords, scan_grid_for_image, click_randomly_in_grid_cell
+                    GLOBAL_CONFIDENCE, CLICK_DELAY_SECONDS, INVEN_SCROLL_CONFIG)
+from grid_cell_utils import get_grid_cell_coords, click_randomly_in_grid_cell
 import screen_utils
 from screen_utils import Box
 
@@ -31,29 +29,6 @@ def get_inven_grid_cells(config: WindowConfig) -> Optional[List[Cell]]:
     return cells
 
 
-def perform_inven_grid_actions(inven_config: WindowConfig) -> Optional[Tuple[List[Cell], List[int], List[Box]]]:
-    """
-    인벤토리 그리드를 계산하고, 대상 이미지를 스캔하여
-    (1) 전체 그리드 셀, (2) 클릭할 셀 인덱스, (3) 찾은 아이템의 실제 위치(Box)를 반환합니다.
-    """
-    grid_cells = get_inven_grid_cells(inven_config)
-    if not grid_cells:
-        return None
-
-    print(f"A 그리드에서 '{INVEN_SCAN_TARGET_IMAGE_PATH.name}' 스캔 중...")
-    found_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, grid_cells, GLOBAL_CONFIDENCE)
-
-    cells_to_click = [i for i, loc in enumerate(found_locations) if loc is not None]
-    item_locations = [loc for loc in found_locations if loc is not None]
-
-    print(f"A 그리드: {len(cells_to_click)}개의 대상 이미지를 찾았습니다.")
-
-    if not cells_to_click:
-        print("경고: 인벤토리 그리드에서 대상 아이템을 찾지 못했습니다.")
-
-    return grid_cells, cells_to_click, item_locations
-
-
 def click_inven_grid_cell(cell_index: int, grid_cells: List[Cell]):
     """인벤토리 그리드의 특정 셀을 클릭합니다."""
     click_randomly_in_grid_cell(cell_index, grid_cells)
@@ -61,9 +36,7 @@ def click_inven_grid_cell(cell_index: int, grid_cells: List[Cell]):
 
 
 def is_scroll_at_limit(config: ScrollCheckConfig, check: str) -> bool:
-    """
-    인벤토리 스크롤이 최상단 또는 최하단에 있는지 확인합니다.
-    """
+    """인벤토리 스크롤이 최상단 또는 최하단에 있는지 확인합니다."""
     base_location = screen_utils.find_image_on_screen(config.base_image_path, GLOBAL_CONFIDENCE)
     if not base_location:
         return False
@@ -88,7 +61,6 @@ def is_scroll_at_limit(config: ScrollCheckConfig, check: str) -> bool:
     return screen_utils.find_image_in_region(image_path, region, GLOBAL_CONFIDENCE) is not None
 
 
-# 스크롤 확인을 위한 헬퍼 함수
 def is_scroll_on_top() -> bool:
     return is_scroll_at_limit(INVEN_SCROLL_CONFIG, "top")
 

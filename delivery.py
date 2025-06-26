@@ -1,51 +1,100 @@
 # delivery.py
 import time
 import pyautogui
-from inven_util import perform_inven_grid_actions, click_inven_grid_cell, get_inven_grid_cells
+
+# [수정] get_inven_grid_cells를 직접 호출하기 위해 임포트
+from inven_util import get_inven_grid_cells, click_inven_grid_cell
 from post_util import click_delivery_button, get_post_grid_cells, click_post_grid_cell, get_delivery_button_rects
 from debug_overlay_util import draw_rects_on_image, draw_base_info_on_image
-from config import (INVEN_CONFIG, POST_CONFIG, CLICK_DELAY_SECONDS, OVERLAY_CONFIG, GLOBAL_CONFIDENCE)
+from config import (INVEN_CONFIG, POST_CONFIG, CLICK_DELAY_SECONDS, OVERLAY_CONFIG,
+                    GLOBAL_CONFIDENCE, INVEN_SCAN_TARGET_IMAGE_PATH)
+from grid_cell_utils import scan_grid_for_image
 import screen_utils
 from screen_utils import paste_text
 
 
-def automate_dynamic_dual_grids():
-    """
-    인벤토리(A)와 우편(B) 그리드를 번갈아 클릭하는 작업을 관리합니다.
-    """
-    print("--- 동적 듀얼 그리드 자동화 시작 ---")
+def _verify_and_fill_post_grid():
+    """우편 그리드(B)가 가득 찼는지 확인하고, 비어있다면 인벤토리(A)의 아이템으로 마저 채웁니다."""
+    print("\n--- 우편 그리드 검증 및 채우기 시작 ---")
 
-    # perform_inven_grid_actions의 반환값이 3개로 늘어났으므로,それに合わせて 수정
-    inven_data = perform_inven_grid_actions(INVEN_CONFIG)
-    if not inven_data:
+    b_grid_cells = get_post_grid_cells(POST_CONFIG)
+    if not b_grid_cells:
+        print("오류: 우편 그리드를 찾을 수 없어 검증을 중단합니다.")
+        return
+
+    print(f"B 그리드에서 '{INVEN_SCAN_TARGET_IMAGE_PATH.name}' 스캔하여 빈칸을 확인합니다...")
+    found_b_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, b_grid_cells, GLOBAL_CONFIDENCE)
+    empty_b_indices = [i for i, loc in enumerate(found_b_locations) if loc is None]
+
+    if not empty_b_indices:
+        print("✅ 검증 완료: 우편 그리드의 모든 칸(12개)이 정상적으로 채워져 있습니다.")
+        return
+
+    print(f"경고: 우편 그리드에 {len(empty_b_indices)}개의 빈 칸이 있습니다. 추가 채우기 작업을 시작합니다.")
+
+    # [리팩토링] inven_util.perform_inven_grid_actions() 대신 직접 로직 수행
+    a_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
+    if not a_grid_cells:
+        print("오류: 인벤토리 정보를 가져올 수 없어 채우기 작업을 중단합니다.")
+        return
+
+    item_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, a_grid_cells, GLOBAL_CONFIDENCE)
+    available_a_indices = [i for i, loc in enumerate(item_locations) if loc is not None]
+
+    if not available_a_indices:
+        print("오류: 인벤토리에 더 이상 옮길 아이템이 없어 채우기를 중단합니다.")
+        return
+
+    print(f"인벤토리에서 옮길 수 있는 아이템 {len(available_a_indices)}개를 추가로 찾았습니다.")
+
+    num_to_fill = min(len(available_a_indices), len(empty_b_indices))
+    print(f"총 {num_to_fill}개의 아이템을 추가로 옮깁니다.")
+
+    for i in range(num_to_fill):
+        a_idx_to_click = available_a_indices[i]
+        b_idx_to_click = empty_b_indices[i]
+
+        print(f"⏩ 추가 적재: A-Grid #{a_idx_to_click} -> B-Grid #{b_idx_to_click}")
+        click_inven_grid_cell(a_idx_to_click, a_grid_cells)
+        click_post_grid_cell(b_idx_to_click, b_grid_cells)
+
+    print("--- 우편 그리드 채우기 완료 ---")
+
+
+def _transfer_items_initial():
+    """[이름 변경] 인벤토리(A)와 우편(B) 그리드를 번갈아 클릭하여 1차 아이템 이전을 수행합니다."""
+    print("--- 1차 아이템 이전 시작 ---")
+
+    # [리팩토링] inven_util.perform_inven_grid_actions() 대신 직접 로직 수행
+    a_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
+    if not a_grid_cells:
         print("인벤토리 그리드 데이터를 가져올 수 없습니다. 중단합니다.")
         return
-    # 자동화 로직에는 item_locations가 필요 없으므로 _ 로 무시합니다.
-    a_grid_cells, a_cells_to_click, _ = inven_data
+
+    print(f"A 그리드에서 '{INVEN_SCAN_TARGET_IMAGE_PATH.name}' 스캔 중...")
+    item_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, a_grid_cells, GLOBAL_CONFIDENCE)
+    a_cells_to_click = [i for i, loc in enumerate(item_locations) if loc is not None]
 
     b_grid_cells = get_post_grid_cells(POST_CONFIG)
     if not b_grid_cells:
         print("우편 그리드 데이터를 가져올 수 없습니다. 중단합니다.")
         return
 
-    # Click Loop
-    print("\n--- Alternating A and B Grid Clicks Started ---")
+    print("\n--- A, B 그리드 교차 클릭 시작 ---")
     max_iterations = min(len(a_cells_to_click), len(b_grid_cells))
-    print(f"Max click iterations: {max_iterations}")
+    print(f"최대 클릭 반복: {max_iterations}회")
 
     for i in range(max_iterations):
-        # Click A Grid (Inventory Item)
         a_cell_idx = a_cells_to_click[i]
-        print(f"⏩ A-Grid Click on cell #{a_cell_idx}...")
+        print(f"⏩ A-Grid 클릭: 셀 #{a_cell_idx}...")
         click_inven_grid_cell(a_cell_idx, a_grid_cells)
 
-        # Click B Grid (Post Slot)
         b_cell_idx = i
-        print(f"⏩ B-Grid Click on cell #{b_cell_idx}...")
+        print(f"⏩ B-Grid 클릭: 셀 #{b_cell_idx}...")
         click_post_grid_cell(b_cell_idx, b_grid_cells)
-        print(f"--- Iteration {i + 1}/{max_iterations} complete ---")
+        print(f"--- 반복 {i + 1}/{max_iterations} 완료 ---")
 
-    print(f"\n--- Dynamic Dual Grid Automation Finished ({max_iterations} iterations) ---")
+    print(f"\n--- 1차 아이템 이전 완료 ({max_iterations}회 반복) ---")
 
 
 def send_action(delivery_type: str, receiver_name: str, amount: str):
@@ -53,26 +102,23 @@ def send_action(delivery_type: str, receiver_name: str, amount: str):
     print(f"\n--- 발송 작업 시작: 유형='{delivery_type}', 수신인='{receiver_name}', 금액='{amount}' ---")
 
     if delivery_type not in ["standard", "express"]:
-        print(f"오류: 잘못된 배송 유형 '{delivery_type}'. 'standard' 또는 'express'여야 합니다.")
+        print(f"오류: 잘못된 배송 유형 '{delivery_type}'.")
         return
 
     click_delivery_button(delivery_type)
-    time.sleep(CLICK_DELAY_SECONDS)
+    time.sleep(CLICK_DELAY_SECONDS/2)
 
     print("'수신인' 버튼 클릭 후 이름 입력 중...")
     click_delivery_button("receiver")
-    time.sleep(CLICK_DELAY_SECONDS)
-
-    # [수정됨] pyautogui.write 대신 paste_text 함수를 사용하여 한글을 입력합니다.
+    time.sleep(CLICK_DELAY_SECONDS/2)
     paste_text(receiver_name)
-    # pyautogui.write(receiver_name)  <- 기존 코드
-
     print(f"수신인 입력 완료: {receiver_name}")
-    time.sleep(CLICK_DELAY_SECONDS)
+    time.sleep(CLICK_DELAY_SECONDS/2)
 
-    print("\n듀얼 그리드 자동화 시작 중...")
-    automate_dynamic_dual_grids()
-    print("듀얼 그리드 자동화 완료.")
+    # [이름 변경] 워크플로우 함수 호출
+    _transfer_items_initial()
+
+    _verify_and_fill_post_grid()
     time.sleep(CLICK_DELAY_SECONDS)
 
     print("'요청' 버튼 클릭 중...")
@@ -82,10 +128,7 @@ def send_action(delivery_type: str, receiver_name: str, amount: str):
     print("'금액' 버튼 클릭 후 금액 입력 중...")
     click_delivery_button("value")
     time.sleep(CLICK_DELAY_SECONDS)
-
-    # 금액은 숫자이므로 pyautogui.write를 사용해도 무방합니다.
     pyautogui.write(amount)
-
     print(f"금액 입력 완료: {amount}")
     time.sleep(CLICK_DELAY_SECONDS)
     pyautogui.press('enter')
@@ -100,9 +143,7 @@ def send_action(delivery_type: str, receiver_name: str, amount: str):
 
 
 def show_all_overlays_for_debugging():
-    """
-    한 번의 스크린샷에 모든 디버그 정보를 그려 마지막에 한 번만 표시합니다.
-    """
+    """한 번의 스크린샷에 모든 디버그 정보를 그려 마지막에 한 번만 표시합니다."""
     print("\n--- 디버그 오버레이 표시 시작 ---")
 
     try:
@@ -112,27 +153,23 @@ def show_all_overlays_for_debugging():
         print(f"스크린샷 생성에 실패했습니다: {e}")
         return
 
-    # 1. 인벤토리(A) 관련 정보 그리기
     print("[1/3] 인벤토리(A 그리드) 정보 그리기...")
-    # 이제 반환값이 3개입니다. 오버레이에 필요한 모든 정보를 받습니다.
-    inven_data = perform_inven_grid_actions(INVEN_CONFIG)
-    if inven_data:
-        a_grid_cells, _, item_locations = inven_data
+    # [리팩토링] inven_util.perform_inven_grid_actions() 대신 직접 로직 수행
+    a_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
+    if a_grid_cells:
+        screenshot = draw_rects_on_image(screenshot, a_grid_cells, OVERLAY_CONFIG.color_grid_a,
+                                         OVERLAY_CONFIG.thickness)
 
-        # 그리드 셀을 스크린샷에 그립니다.
-        if a_grid_cells:
-            screenshot = draw_rects_on_image(screenshot, a_grid_cells, OVERLAY_CONFIG.color_grid_a,
-                                             OVERLAY_CONFIG.thickness)
+        item_locations_boxes = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, a_grid_cells, GLOBAL_CONFIDENCE)
+        # scan_grid_for_image가 Box 객체 또는 None의 리스트를 반환한다고 가정
+        item_locations_found = [loc for loc in item_locations_boxes if loc is not None]
 
-        # [신규] 발견된 아이템 위치를 스크린샷에 그립니다.
-        if item_locations:
-            print(f"{len(item_locations)}개의 아이템 위치를 오버레이에 표시합니다.")
-            # item_locations는 Box 객체의 리스트이므로, 사각형 튜플로 변환해줍니다.
-            item_rects = [(loc.left, loc.top, loc.width, loc.height) for loc in item_locations]
+        if item_locations_found:
+            print(f"{len(item_locations_found)}개의 아이템 위치를 오버레이에 표시합니다.")
+            item_rects = [(loc.left, loc.top, loc.width, loc.height) for loc in item_locations_found]
             screenshot = draw_rects_on_image(screenshot, item_rects, OVERLAY_CONFIG.color_inven_item,
                                              OVERLAY_CONFIG.thickness)
 
-    # 기준 이미지 위치는 그리드보다 나중에 그려서 겹쳐 보이도록 합니다.
     inven_base_location = screen_utils.find_image_on_screen(INVEN_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
     if inven_base_location:
         screenshot = draw_base_info_on_image(screenshot, inven_base_location, OVERLAY_CONFIG.color_base_image,
@@ -140,7 +177,6 @@ def show_all_overlays_for_debugging():
     else:
         print(f"'{INVEN_CONFIG.base_image_path.name}' 이미지를 찾을 수 없어 인벤토리 오버레이를 건너뜁니다.")
 
-    # 2. 우편(B) 관련 정보 그리기 (기존 로직과 유사)
     print("[2/3] 우편(B 그리드) 정보 그리기...")
     post_base_location = screen_utils.find_image_on_screen(POST_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
     if post_base_location:
@@ -159,8 +195,6 @@ def show_all_overlays_for_debugging():
     else:
         print(f"'{POST_CONFIG.base_image_path.name}' 이미지를 찾을 수 없어 우편 오버레이를 건너뜁니다.")
 
-    # 3. 최종 이미지 표시
     print("[3/3] 최종 오버레이 이미지 표시...")
     screenshot.show(title="Debug Overlay (All-in-one)")
     print("--- 모든 디버그 오버레이 표시 완료 ---")
-

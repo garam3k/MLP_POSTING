@@ -8,9 +8,7 @@ Color = Tuple[int, int, int]
 
 
 def _get_font(size: int = 15) -> ImageFont.FreeTypeFont:
-    """
-    사용 가능한 경우 'malgun.ttf' 폰트를 로드하고, 없으면 기본 폰트를 반환합니다.
-    """
+    """사용 가능한 경우 'malgun.ttf' 폰트를 로드하고, 없으면 기본 폰트를 반환합니다."""
     try:
         return ImageFont.truetype("malgun.ttf", size)
     except IOError:
@@ -37,11 +35,9 @@ def draw_base_info_on_image(image: Image.Image, location: Box, rect_color: Color
     draw = ImageDraw.Draw(image)
     font = _get_font()
 
-    # 사각형 그리기
     rect = (location.left, location.top, location.width, location.height)
     draw.rectangle([rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]], outline=rect_color, width=thickness)
 
-    # 텍스트 그리기
     text = f"({location.left}, {location.top})"
     text_pos = (location.left, location.top - 20 if location.top > 20 else location.top + location.height)
     draw.text(text_pos, text, fill=text_color, font=font, stroke_width=1, stroke_fill=(0, 0, 0))
