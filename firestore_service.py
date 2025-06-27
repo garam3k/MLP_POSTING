@@ -5,6 +5,9 @@ from typing import List, Dict, Any
 
 from config import FIRESTORE_CONFIG
 
+# [신규] Firestore 연결 실패 시 발생시킬 커스텀 예외 정의
+class FirestoreConnectionError(Exception):
+    pass
 
 class FirestoreService:
     def __init__(self):
@@ -18,11 +21,11 @@ class FirestoreService:
                 firebase_admin.initialize_app(cred)
             return firestore.client()
         except FileNotFoundError:
-            print(f"오류: Firestore 서비스 계정 키 파일('{FIRESTORE_CONFIG.service_account_key_path}')을 찾을 수 없습니다.")
-            exit()
+            # [수정] exit() 대신 예외를 발생시켜 main.py에서 처리하도록 변경
+            raise FirestoreConnectionError(f"Firestore 서비스 계정 키 파일('{FIRESTORE_CONFIG.service_account_key_path}')을 찾을 수 없습니다.")
         except Exception as e:
-            print(f"Firestore 초기화 중 오류 발생: {e}")
-            exit()
+            # [수정] exit() 대신 예외를 발생시켜 main.py에서 처리하도록 변경
+            raise FirestoreConnectionError(f"Firestore 초기화 중 오류 발생: {e}")
 
     def add_whisper(self, name: str, channel: str, comment: str):
         """파싱된 귓속말 데이터를 Firestore에 저장합니다."""
