@@ -13,8 +13,9 @@ from firestore_service import FirestoreService
 class AutomationApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("자동화 시스템 v2.2 (Hotkeys Enhanced)")
-        self.root.geometry("800x550")
+        self.root.title("자동화 시스템 v2.3 (Quick-Copy Added)")
+        # [수정] 새 위젯을 위해 기본 창 높이 증가
+        self.root.geometry("800x620")
         self.root.resizable(True, True)
 
         # --- 서비스 초기화 ---
@@ -105,6 +106,21 @@ class AutomationApp:
         debug_button = ttk.Button(action_button_frame, text="오버레이 보기", command=self._run_overlay_debug)
         debug_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(5, 0))
 
+        # --- [신규] 빠른 응답 복사 프레임 ---
+        quick_copy_frame = ttk.LabelFrame(left_frame, text="빠른 응답 복사", padding=10)
+        quick_copy_frame.pack(fill=tk.X, pady=(10, 0), anchor='n')
+
+        response1 = "일반/특배 어떻게 보내드릴까요?"
+        response2 = "세트수 + 일반/특배 알려주시면 보내드려요~"
+
+        copy_button1 = ttk.Button(quick_copy_frame, text=response1,
+                                  command=lambda: self._copy_response_to_clipboard(response1))
+        copy_button1.pack(pady=(0, 2), fill=tk.X)
+
+        copy_button2 = ttk.Button(quick_copy_frame, text=response2,
+                                  command=lambda: self._copy_response_to_clipboard(response2))
+        copy_button2.pack(pady=2, fill=tk.X)
+
         # --- 오른쪽 프레임 내부 위젯 구성 ---
         whisper_top_frame = ttk.Frame(right_frame)
         whisper_top_frame.pack(fill=tk.X, pady=(0, 5))
@@ -128,15 +144,17 @@ class AutomationApp:
         self._setup_hotkeys()
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
-    # [수정됨] 귓속말 닉네임 선택 시 처리할 함수
+    def _copy_response_to_clipboard(self, response: str):
+        """[신규] 지정된 응답 문구를 클립보드에 복사합니다."""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(response)
+        print(f"📋 클립보드에 복사됨: '{response}'")
+
     def _handle_whisper_selection(self, nickname: str):
         """귓속말 목록의 이름을 클립보드에 복사하고 수신인 칸에도 입력합니다."""
-        # 1. 클립보드에 복사
         self.root.clipboard_clear()
         self.root.clipboard_append(nickname)
         print(f"📋 '{nickname}'가 클립보드에 복사되었습니다.")
-
-        # 2. 수신인 칸에 입력
         self.receiver_var.set(nickname)
         print(f"🖋️ 수신인에 '{nickname}'이(가) 입력되었습니다.")
 
@@ -200,7 +218,6 @@ class AutomationApp:
             label = ttk.Label(row_frame, text=name, anchor='w')
             label.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
-            # [수정됨] 버튼 클릭 시 _handle_whisper_selection 함수를 호출하도록 변경
             copy_button = ttk.Button(row_frame, text="복사", style="Outline.TButton",
                                      command=lambda n=name: self._handle_whisper_selection(n))
             copy_button.pack(side=tk.RIGHT)
