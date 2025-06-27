@@ -1,0 +1,30 @@
+# .gitignore
+
+# --- 보안 관련 파일 ---
+# Google Cloud 서비스 계정 키 파일. 절대로 Git에 커밋하면 안 됩니다.
+serviceAccountKey.json
+
+# --- 로그 파일 ---
+# 애플리케이션 및 디버깅 로그가 저장되는 폴더
+logs/
+*.log
+
+# --- Python 가상환경 폴더 ---
+# `uv venv` 또는 `python -m venv` 로 생성되는 폴더들
+.venv/
+venv/
+env/
+
+# --- Python 캐시 및 컴파일 파일 ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- IDE 및 에디터 설정 파일 ---
+.idea/
+.vscode/
+
+# --- 운영체제(OS) 생성 파일 ---
+.DS_Store
+Thumbs.db
