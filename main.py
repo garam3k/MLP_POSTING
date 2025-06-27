@@ -6,23 +6,20 @@ import sys
 import logging
 from pynput import keyboard as pynput_keyboard
 
-# [신규] logger_setup 임포트
-# logger_setup.py 파일이 없다면 이전 답변을 참고하여 생성해주세요.
 try:
     from logger_setup import setup_file_logger
 except ImportError:
-    # logger_setup.py가 없는 경우를 대비한 임시 함수
     def setup_file_logger(name, file):
         return logging.getLogger(name)
 
+# [수정] delivery 모듈 등 다른 모듈과 함께 GUI_CONFIG 임포트
+from config import GUI_CONFIG
 from delivery import send_action, show_all_overlays_for_debugging
 from window_util import remove_window_border, resize_window, activate_maple_window
 from map_util import open_shop, open_post
 from whisper_service import WhisperService
-# [신규] 커스텀 예외를 임포트
 from firestore_service import FirestoreService, FirestoreConnectionError
 
-# [신규] 애플리케이션 메인 로거 설정
 app_logger = setup_file_logger('app_main', 'app_main.log')
 
 
@@ -30,13 +27,16 @@ class AutomationApp:
     def __init__(self, root):
         self.root = root
         app_logger.info("Initializing AutomationApp UI...")
-        self.root.title("자동화 시스템 v2.4 (Logging Enhanced)")
-        self.root.geometry("800x620")
+
+        # [수정] config.py의 GUI_CONFIG 설정을 사용하여 창 제목과 위치/크기를 설정
+        self.root.title(GUI_CONFIG.title)
+        geometry_string = f"{GUI_CONFIG.initial_width}x{GUI_CONFIG.initial_height}+{GUI_CONFIG.initial_pos_x}+{GUI_CONFIG.initial_pos_y}"
+        self.root.geometry(geometry_string)
+
         self.root.resizable(True, True)
 
         # --- 서비스 초기화 ---
         app_logger.info("Initializing services...")
-        # FirestoreService는 main 실행 블록에서 예외 처리되므로 여기서는 호출만 합니다.
         self.firestore_service = FirestoreService()
         app_logger.info("FirestoreService initialized successfully.")
 
@@ -48,7 +48,7 @@ class AutomationApp:
         remove_window_border()
         resize_window(1366, 768)
 
-        # --- 스타일 및 위젯 설정 (기존과 동일) ---
+        # --- (이하 코드는 기존과 동일) ---
         style = ttk.Style(self.root)
         style.configure("TFrame", padding=10)
         style.configure("TLabel", padding=5)

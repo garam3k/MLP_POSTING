@@ -11,6 +11,15 @@ GLOBAL_CONFIDENCE = 0.8
 CLICK_DELAY_SECONDS = 0.03
 
 # --- Dataclass Definitions for Typed Configs ---
+@dataclass(frozen=True)
+class GuiConfig:
+    """GUI 애플리케이션 창의 설정을 관리합니다."""
+    title: str = "자동화 시스템 v2.5"
+    initial_width: int = 800
+    initial_height: int = 620
+    # 화면 좌상단으로부터의 X, Y 좌표 (픽셀 단위)
+    initial_pos_x: int = 0
+    initial_pos_y: int = 800
 
 @dataclass(frozen=True)
 class WindowConfig:
@@ -129,3 +138,4 @@ FIRESTORE_CONFIG = FirestoreConfig()
 SNIFFER_CONFIG = SnifferConfig()
 WHISPER_PARSER_CONFIG = WhisperParserConfig()
 OVERLAY_CONFIG = OverlayConfig()
+GUI_CONFIG = GuiConfig()
