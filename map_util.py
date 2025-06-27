@@ -264,7 +264,7 @@ def open_shop():
 
         pyautogui.click(buy_button_pos)
         click_count += 1
-        time.sleep(0.05)
+        time.sleep(0.02)
     else:
         # for 루프가 break 없이 정상적으로(300회) 종료되었을 경우
         print("경고: 최대 300회 클릭 후에도 중단 조건을 만족하지 못해 작업을 중지합니다.")
