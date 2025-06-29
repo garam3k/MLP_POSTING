@@ -119,8 +119,11 @@ DELIVERY_BUTTONS: dict[str, ButtonConfig] = {
     "request": ButtonConfig(offset_x=264, offset_y=382, width=11, height=10),
     "value": ButtonConfig(offset_x=94, offset_y=410, width=14, height=17),
     "send": ButtonConfig(offset_x=343, offset_y=489, width=67, height=19),
+    "receive": ButtonConfig(offset_x=681, offset_y=493, width=10, height=10),
 }
 INVEN_SCAN_TARGET_IMAGE_PATH = ASSETS_DIR / "cider.png"
+PAYMENT_IMAGE_PATH = ASSETS_DIR / "payment.png"
+RECEIPT_IMAGE_PATH = ASSETS_DIR / "receipt.png"
 INVEN_SCROLL_CONFIG = ScrollCheckConfig(
     base_image_path=ASSETS_DIR / "inven.png",
     top_image_path=ASSETS_DIR / "scroll_top.png",

@@ -74,3 +74,10 @@ def get_delivery_button_rects() -> Optional[List[Cell]]:
         print(f"  - 버튼 '{name}' 영역: {rect}")
 
     return button_rects
+
+
+def click_receive_button():
+    """우편 받기 버튼을 클릭합니다."""
+    print("\n--- 우편 받기 버튼 클릭 ---")
+    # 기존 버튼 클릭 함수를 재사용하여 일관성 유지
+    click_delivery_button("receive")

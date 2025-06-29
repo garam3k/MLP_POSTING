@@ -4,6 +4,10 @@ from tkinter import ttk
 from tkinter import messagebox
 import sys
 import logging
+import pyautogui
+import time
+import random
+import threading
 from pynput import keyboard as pynput_keyboard
 
 try:
@@ -12,11 +16,15 @@ except ImportError:
     def setup_file_logger(name, file):
         return logging.getLogger(name)
 
-# [수정] delivery 모듈 등 다른 모듈과 함께 GUI_CONFIG 임포트
-from config import GUI_CONFIG
+# [수정] 필요한 설정값 추가 임포트
+from config import GUI_CONFIG, RECEIPT_IMAGE_PATH, GLOBAL_CONFIDENCE, PAYMENT_IMAGE_PATH, POST_CONFIG
 from delivery import send_action, show_all_overlays_for_debugging
 from window_util import remove_window_border, resize_window, activate_maple_window
 from map_util import open_shop, open_post
+# [수정] click_payment_item은 삭제되었으므로 임포트에서 제거
+from post_util import click_receive_button
+import screen_utils
+from grid_cell_utils import click_randomly_in_cell  # [신규] 직접 클릭을 위해 임포트
 from whisper_service import WhisperService
 from firestore_service import FirestoreService, FirestoreConnectionError
 
@@ -24,18 +32,19 @@ app_logger = setup_file_logger('app_main', 'app_main.log')
 
 
 class AutomationApp:
+    # ... (__init__, _setup_ui_layout 등 이전 코드는 변경 없음) ...
     def __init__(self, root):
         self.root = root
         app_logger.info("Initializing AutomationApp UI...")
 
-        # [수정] config.py의 GUI_CONFIG 설정을 사용하여 창 제목과 위치/크기를 설정
+        self.is_f5_loop_running = False
+
         self.root.title(GUI_CONFIG.title)
         geometry_string = f"{GUI_CONFIG.initial_width}x{GUI_CONFIG.initial_height}+{GUI_CONFIG.initial_pos_x}+{GUI_CONFIG.initial_pos_y}"
         self.root.geometry(geometry_string)
 
         self.root.resizable(True, True)
 
-        # --- 서비스 초기화 ---
         app_logger.info("Initializing services...")
         self.firestore_service = FirestoreService()
         app_logger.info("FirestoreService initialized successfully.")
@@ -48,7 +57,6 @@ class AutomationApp:
         remove_window_border()
         resize_window(1366, 768)
 
-        # --- (이하 코드는 기존과 동일) ---
         style = ttk.Style(self.root)
         style.configure("TFrame", padding=10)
         style.configure("TLabel", padding=5)
@@ -62,7 +70,6 @@ class AutomationApp:
         self._setup_ui_layout()
         app_logger.info("UI layout setup complete.")
 
-        # --- 전역 단축키 리스너 설정 ---
         self._setup_hotkeys()
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
@@ -77,7 +84,6 @@ class AutomationApp:
         right_frame = ttk.LabelFrame(main_frame, text="최근 귓속말 (고유 닉네임 15명)", padding=10)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # ... (이하 기존 위젯 배치 코드와 동일)
         top_control_frame = ttk.Frame(left_frame)
         top_control_frame.pack(fill=tk.X, pady=(0, 10), anchor='n')
         macro_frame = ttk.LabelFrame(top_control_frame, text="기능 실행", padding=10)
@@ -86,6 +92,10 @@ class AutomationApp:
         shop_button.pack(pady=2, fill=tk.X)
         post_button = ttk.Button(macro_frame, text="우체통 열기 (F2-2)", command=open_post)
         post_button.pack(pady=2, fill=tk.X)
+
+        self.receive_item_button = ttk.Button(macro_frame, text="아이템 받기 (F5)", command=self._toggle_f5_loop)
+        self.receive_item_button.pack(pady=2, fill=tk.X)
+
         window_control_frame = ttk.LabelFrame(top_control_frame, text="창 크기 조절", padding=10)
         window_control_frame.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
         preset1_button = ttk.Button(window_control_frame, text="1366 x 768 (F3)",
@@ -149,36 +159,100 @@ class AutomationApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self._refresh_whisper_list()
 
-    def is_gui_visible(self) -> bool:
-        """GUI 창이 현재 화면에 보이는지 확인하고 로그를 남깁니다."""
+    def _toggle_f5_loop(self):
+        """F5 아이템 받기 루프의 시작/중단 상태를 토글합니다."""
+        if self.is_f5_loop_running:
+            print("\n[사용자 요청] 아이템 받기 루프 중단 신호를 보냅니다...")
+            self.is_f5_loop_running = False
+            self.receive_item_button.config(text="아이템 받기 (F5)")
+        else:
+            print("\n[사용자 요청] 아이템 받기 루프를 시작합니다 (최대 100회)...")
+            self.is_f5_loop_running = True
+            self.receive_item_button.config(text="받는 중... (F5 중단)")
+            threading.Thread(target=self._run_receive_sequence, daemon=True).start()
+
+    def _run_receive_sequence(self):
+        """[수정됨] 다음 아이템을 탐색하고 발견 시 즉시 작업을 수행하는 시퀀스를 100회 반복합니다."""
+        if not activate_maple_window():
+            self.is_f5_loop_running = False
+            return
+
         try:
-            if self.root and self.root.winfo_exists():
-                is_visible = self.root.winfo_viewable()
-                app_logger.info(f"GUI window visibility check: {'Visible' if is_visible else 'Not Visible'}")
-                return is_visible == 1
-        except Exception as e:
-            app_logger.error(f"Error checking GUI visibility: {e}")
-        return False
+            for i in range(100):
+                if not self.is_f5_loop_running:
+                    print("사용자 요청에 의해 아이템 받기 루프를 중단했습니다.")
+                    break
 
-    # ... (이하 _copy_response_to_clipboard, _handle_whisper_selection 등 다른 메서드는 기존과 동일)
-    def _copy_response_to_clipboard(self, response: str):
-        self.root.clipboard_clear()
-        self.root.clipboard_append(response)
-        print(f"📋 클립보드에 복사됨: '{response}'")
+                print(f"\n--- 아이템 받기 시작 ({i + 1}/100) ---")
 
-    def _handle_whisper_selection(self, nickname: str):
-        self.root.clipboard_clear()
-        self.root.clipboard_append(nickname)
-        print(f"📋 '{nickname}'가 클립보드에 복사되었습니다.")
-        self.receiver_var.set(nickname)
-        print(f"🖋️ 수신인에 '{nickname}'이(가) 입력되었습니다.")
+                # 1. 다음 'payment.png'를 최대 5초간 탐색
+                print(f"다음 '{PAYMENT_IMAGE_PATH.name}'를 최대 5초간 탐색합니다...")
+                payment_location = None
+                search_start_time = time.time()
 
-    def _run_f2_sequence(self):
-        print("\n[단축키 F2] 상점 열기 -> 우체통 열기 순차 실행 시작...")
-        open_shop()
-        print("\n상점 열기 완료. 이어서 우체통 열기를 시작합니다.")
-        open_post()
-        print("\n[단축키 F2] 모든 동작이 완료되었습니다.")
+                post_base_location = screen_utils.find_image_on_screen(POST_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
+                if not post_base_location:
+                    print("오류: 우편 창을 찾을 수 없어 루프를 중단합니다.")
+                    break
+
+                search_region = (
+                    post_base_location.left + 152, post_base_location.top + 149,
+                    281 - 152, 430 - 149
+                )
+
+                while time.time() - search_start_time < 5:
+                    if not self.is_f5_loop_running: break
+
+                    payment_location = screen_utils.find_image_in_region(PAYMENT_IMAGE_PATH, search_region,
+                                                                         GLOBAL_CONFIDENCE)
+                    if payment_location:
+                        print(f"'{PAYMENT_IMAGE_PATH.name}' 발견!")
+                        break
+                    time.sleep(0.2)
+
+                if not self.is_f5_loop_running:
+                    print("사용자 요청에 의해 루프를 중단합니다.")
+                    break
+
+                if not payment_location:
+                    print("시간 초과: 다음 아이템을 찾지 못해 루프를 종료합니다.")
+                    break
+
+                # 2. 발견한 아이템 클릭
+                click_randomly_in_cell(
+                    payment_location.left, payment_location.top,
+                    payment_location.width, payment_location.height
+                )
+                time.sleep(0.1)
+
+                # 3. 받기 버튼 클릭
+                click_receive_button()
+
+                # 4. 영수증 이미지 대기 후 Enter
+                receipt_start_time = time.time()
+                receipt_found = False
+                while time.time() - receipt_start_time < 5:
+                    if not self.is_f5_loop_running: break
+                    if screen_utils.find_image_on_screen(RECEIPT_IMAGE_PATH, confidence=GLOBAL_CONFIDENCE):
+                        receipt_found = True
+                        break
+                    time.sleep(0.2)
+
+                if not self.is_f5_loop_running:
+                    print("사용자 요청에 의해 루프를 중단합니다.")
+                    break
+
+                if receipt_found:
+                    pyautogui.press('enter')
+                else:
+                    print(f"경고: 5초 내에 '{RECEIPT_IMAGE_PATH.name}' 이미지를 찾지 못했습니다.")
+
+            else:
+                print("\n--- 아이템 받기 100회 루프가 모두 완료되었습니다. ---")
+
+        finally:
+            self.is_f5_loop_running = False
+            self.root.after(0, self.receive_item_button.config, {'text': '아이템 받기 (F5)'})
 
     def _handle_hotkey(self, key):
         try:
@@ -186,6 +260,7 @@ class AutomationApp:
                 print("\n[단축키 F1] 배송 시작 동작을 실행합니다.")
                 self.root.after(0, self._run_delivery)
             elif key == pynput_keyboard.Key.f2:
+                print("\n[단축키 F2] 상점 열기 -> 우체통 열기 순차 실행 시작...")
                 self.root.after(0, self._run_f2_sequence)
             elif key == pynput_keyboard.Key.f3:
                 print("\n[단축키 F3] 창 크기를 1366x768로 변경합니다.")
@@ -193,8 +268,18 @@ class AutomationApp:
             elif key == pynput_keyboard.Key.f4:
                 print("\n[단축키 F4] 창 크기를 1900x300으로 변경합니다.")
                 self.root.after(0, lambda: resize_window(1900, 300))
+            elif key == pynput_keyboard.Key.f5:
+                self.root.after(0, self._toggle_f5_loop)
         except Exception as e:
             print(f"단축키 처리 중 오류 발생: {e}")
+
+    # ... (이하 모든 코드는 이전과 동일)
+    def _run_f2_sequence(self):
+        print("\n[단축키 F2] 상점 열기 -> 우체통 열기 순차 실행 시작...")
+        open_shop()
+        print("\n상점 열기 완료. 이어서 우체통 열기를 시작합니다.")
+        open_post()
+        print("\n[단축키 F2] 모든 동작이 완료되었습니다.")
 
     def _setup_hotkeys(self):
         self.hotkey_listener = pynput_keyboard.Listener(on_press=self._handle_hotkey)
@@ -224,6 +309,18 @@ class AutomationApp:
                                      command=lambda n=name: self._handle_whisper_selection(n))
             copy_button.pack(side=tk.RIGHT)
 
+    def _copy_response_to_clipboard(self, response: str):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(response)
+        print(f"📋 클립보드에 복사됨: '{response}'")
+
+    def _handle_whisper_selection(self, nickname: str):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(nickname)
+        print(f"📋 '{nickname}'가 클립보드에 복사되었습니다.")
+        self.receiver_var.set(nickname)
+        print(f"🖋️ 수신인에 '{nickname}'이(가) 입력되었습니다.")
+
     def _run_delivery(self):
         if not activate_maple_window(): return
         delivery_type = self.delivery_type_var.get()
@@ -251,19 +348,16 @@ class AutomationApp:
 
 
 if __name__ == "__main__":
-    # [신규] 애플리케이션 실행 전체를 try-except로 감싸 안정성 확보
     app_logger.info("========================================")
     app_logger.info("Application starting up...")
     root = None
     try:
         root = tk.Tk()
-        # [신규] 초기화가 끝나기 전까지는 창을 숨깁니다.
         root.withdraw()
         app_logger.info("Root Tk window created and withdrawn.")
 
         app = AutomationApp(root)
 
-        # [신규] 모든 초기화 성공 후 창을 화면에 표시합니다.
         app_logger.info("AutomationApp initialization successful. Showing GUI window.")
         root.deiconify()
 
@@ -271,18 +365,13 @@ if __name__ == "__main__":
         root.mainloop()
 
     except (FirestoreConnectionError, Exception) as e:
-        # [신규] 초기화 중 발생하는 모든 심각한 오류를 여기서 잡습니다.
-        # 오류를 로그 파일에 자세히 기록합니다.
         app_logger.critical("A fatal error occurred during application startup. GUI cannot be displayed.",
                             exc_info=True)
-        # 사용자에게 오류 메시지 박스를 보여줍니다.
         if root:
-            # Tk 객체가 생성되었다면 메시지 박스를 사용할 수 있습니다.
             messagebox.showerror("치명적 오류",
                                  f"애플리케이션 시작 중 심각한 오류가 발생했습니다.\n\n자세한 내용은 'logs/app_main.log' 파일을 확인해주세요.\n\n오류: {e}")
         else:
-            # Tk 객체조차 생성 실패한 경우, 콘솔에만 출력합니다.
             print(f"CRITICAL: 애플리케이션 시작 중 심각한 오류가 발생했습니다. 로그 파일을 확인해주세요. 오류: {e}")
-        sys.exit(1)  # 오류 코드와 함께 종료
+        sys.exit(1)
 
     app_logger.info("Application shutdown gracefully.")
