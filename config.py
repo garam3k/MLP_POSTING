@@ -15,11 +15,11 @@ CLICK_DELAY_SECONDS = 0.03
 class GuiConfig:
     """GUI 애플리케이션 창의 설정을 관리합니다."""
     title: str = "자동화 시스템 v2.5"
-    initial_width: int = 800
-    initial_height: int = 620
+    initial_width: int = 500
+    initial_height: int = 600
     # 화면 좌상단으로부터의 X, Y 좌표 (픽셀 단위)
     initial_pos_x: int = 0
-    initial_pos_y: int = 800
+    initial_pos_y: int = 770
 
 @dataclass(frozen=True)
 class WindowConfig:

@@ -212,14 +212,14 @@ def open_shop():
 
     print("해상도를 1900x300으로 변경합니다.")
     resize_window(1900, 300)
-    time.sleep(1.5)
+    time.sleep(1)
 
     click_doran()
-    time.sleep(1.5)
+    time.sleep(1)
 
     print("해상도를 1366x768로 복구합니다.")
     resize_window(1366, 768)
-    time.sleep(1.5)
+    time.sleep(1)
 
     print("\n[아이템 구매 단계] 상점에서 아이템 구매를 시작합니다.")
     search_region = (350, 300, 250, 300)
@@ -264,7 +264,7 @@ def open_shop():
 
         pyautogui.click(buy_button_pos)
         click_count += 1
-        time.sleep(0.02)
+        time.sleep(0.01)
     else:
         # for 루프가 break 없이 정상적으로(300회) 종료되었을 경우
         print("경고: 최대 300회 클릭 후에도 중단 조건을 만족하지 못해 작업을 중지합니다.")
