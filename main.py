@@ -266,6 +266,7 @@ class AutomationApp:
 
                 if receipt_found:
                     pyautogui.press('enter')
+                    time.sleep(1)
                 else:
                     print(f"경고: 5초 내에 '{RECEIPT_IMAGE_PATH.name}' 이미지를 찾지 못했습니다.")
             else:
