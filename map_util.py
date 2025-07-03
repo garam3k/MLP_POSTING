@@ -1,11 +1,11 @@
 # map_util.py
 import random
+import threading
 import time
 from typing import Optional, Callable
 
 import pyautogui
 import pygetwindow as gw
-# [신규] pynput 라이브러리 임포트
 from pynput import keyboard as pynput_keyboard
 
 import screen_utils
@@ -13,7 +13,61 @@ from config import ASSETS_DIR, GLOBAL_CONFIDENCE, DEWEY_CONFIG, DORAN_CONFIG, IN
 from grid_cell_utils import click_randomly_in_cell
 from window_util import WINDOW_TITLE, resize_window, activate_maple_window
 
-# --- [신규] 전역 변수 및 키보드 리스너 콜백 함수 ---
+
+# --- [신규] 반복 클릭 스레드를 관리하는 클래스 ---
+class ClickBot:
+    """
+    백그라운드에서 반복적인 클릭을 수행하고 상태를 관리하는 스레드 제어 클래스.
+    """
+
+    def __init__(self, button_pos: tuple[int, int]):
+        """
+        Args:
+            button_pos (tuple[int, int]): 클릭할 화면의 (x, y) 좌표.
+        """
+        self.button_pos = button_pos
+        self._is_running = False
+        self.click_count = 0
+        self._thread = None
+
+    @property
+    def is_running(self) -> bool:
+        """스레드가 현재 실행 중인지 여부를 반환합니다."""
+        return self._is_running
+
+    def _click_worker(self):
+        """실제로 클릭을 수행하는 워커 함수. 스레드에서 실행됩니다."""
+        print("백그라운드 클릭 스레드 시작...")
+        while self._is_running:
+            pyautogui.click(self.button_pos)
+            self.click_count += 1
+        print(f"백그라운드 클릭 스레드 정지. (최종 클릭 수: {self.click_count})")
+
+    def start(self):
+        """클릭 작업을 시작합니다."""
+        if self._thread and self._thread.is_alive():
+            print("경고: 클릭 스레드가 이미 실행 중입니다.")
+            return
+
+        self._is_running = True
+        # 데몬 스레드로 설정하여 메인 프로그램 종료 시 함께 종료되도록 함
+        self._thread = threading.Thread(target=self._click_worker, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> int:
+        """클릭 작업을 중지하고 총 클릭 횟수를 반환합니다."""
+        if not self._is_running:
+            return self.click_count
+
+        self._is_running = False
+        if self._thread:
+            # 스레드가 완전히 종료될 때까지 최대 1초 대기
+            self._thread.join(timeout=1.0)
+
+        return self.click_count
+
+
+# --- 전역 변수 및 키보드 리스너 콜백 함수 ---
 # 동작 중단 플래그
 stop_action = False
 
@@ -32,7 +86,21 @@ def on_press(key):
         print(f"키보드 리스너 콜백 함수에서 오류 발생: {e}")
 
 
-# --- 기존 함수들 (변경 없음) ---
+# [신규] 중복 코드를 제거하기 위한 공통 초기화 함수
+def prepare_and_activate_window(sequence_name: str) -> bool:
+    """
+    공통 시퀀스 초기화 작업을 수행합니다: 창 활성화, 시퀀스 이름 출력, ESC 연타.
+    성공 시 True, 창 활성화 실패 시 False를 반환합니다.
+    """
+    if not activate_maple_window():
+        return False
+
+    print(f"\n--- {sequence_name} 시퀀스 시작 ---")
+    print("초기화 동작: ESC 5회 입력")
+    pyautogui.press('esc', presses=5, interval=0.1)
+    time.sleep(0.2)
+    return True
+
 
 def _get_target_window_and_check_size(expected_width: int, expected_height: int) -> Optional[gw.Win32Window]:
     """
@@ -198,16 +266,12 @@ def goto_market():
 
 def open_shop():
     """
-    [수정됨] 마켓으로 이동하여 상점을 열고, 지정된 아이템을 반복 구매하는 전체 과정을 수행합니다.
-    ESC 키를 눌러 아이템 구매를 중단할 수 있습니다.
+    [수정됨] 마켓으로 이동하여 상점을 열고, 지정된 아이템을 반복 구매합니다.
+    클릭은 백그라운드 스레드에서 초고속으로 수행되며, 메인 스레드는 중단 조건(이미지 발견, ESC)을 감시합니다.
     """
-    if not activate_maple_window():
+    # [수정] 공통 초기화 함수 호출
+    if not prepare_and_activate_window("상점 열기"):
         return
-
-    print("\n--- 상점 열기 시퀀스 시작 ---")
-    print("초기화 동작: ESC 5회 입력")
-    pyautogui.press('esc', presses=5, interval=0.1)
-    time.sleep(0.2)
 
     goto_market()
 
@@ -245,39 +309,42 @@ def open_shop():
     nomore_image_path = ASSETS_DIR / "nomore.png"
     print(f"'아이템 사기' 버튼({buy_button_pos}) 반복 클릭을 시작합니다. ('{nomore_image_path.name}' 발견 또는 ESC 입력 시 중단)")
 
-    # --- [신규] 키보드 리스너 설정 ---
+    # --- 스레드를 이용한 고속 클릭 로직 ---
+    # 1. 키보드 리스너 설정
     global stop_action
     stop_action = False  # 루프 시작 전 플래그 초기화
     listener = pynput_keyboard.Listener(on_press=on_press)
     listener.start()
 
-    click_count = 0
-    # [수정] 반복 횟수를 300회로 줄임
-    for _ in range(300):
-        # [수정] 루프 시작 시 중단 플래그(ESC) 확인
+    # 2. ClickBot 인스턴스 생성 및 실행
+    click_bot = ClickBot(button_pos=buy_button_pos)
+    click_bot.start()
+
+    # 3. 메인 스레드는 중단 조건 감시
+    start_time = time.time()
+    timeout_seconds = 30  # 최대 30초 동안 실행
+    stop_reason = "시간 초과"
+
+    nomore_search_region = (390, 90, 555 - 390, 152 - 90)
+    print(f"'nomore' 이미지를 영역 {nomore_search_region} 내에서 감시합니다.")
+
+    while time.time() - start_time < timeout_seconds:
         if stop_action:
+            stop_reason = "사용자 요청(ESC)"
             break
-
-        # '더 이상 살 수 없다'는 이미지 확인
-        if screen_utils.find_image_on_screen(nomore_image_path, confidence=GLOBAL_CONFIDENCE):
-            print(f"'{nomore_image_path.name}' 이미지를 발견하여 반복 클릭을 중단합니다.")
+        if screen_utils.find_image_in_region(nomore_image_path, region=nomore_search_region,
+                                             confidence=GLOBAL_CONFIDENCE):
+            stop_reason = f"'{nomore_image_path.name}' 이미지 발견"
             break
+        time.sleep(0.1)  # 0.1초마다 조건 확인
 
-        pyautogui.click(buy_button_pos)
-        click_count += 1
-        time.sleep(0.01)
-    else:
-        # for 루프가 break 없이 정상적으로(300회) 종료되었을 경우
-        print("경고: 최대 300회 클릭 후에도 중단 조건을 만족하지 못해 작업을 중지합니다.")
+    print(f"\n[작업 중단] 사유: {stop_reason}")
 
-    # [신규] 리스너 스레드를 안전하게 정리
+    # 4. 모든 스레드 정리
+    final_click_count = click_bot.stop()
     listener.stop()
 
-    if stop_action:
-        print(f"사용자의 요청(ESC)에 의해 총 {click_count}회 구매 시도 후 작업을 중단했습니다.")
-    else:
-        print(f"총 {click_count}회 구매를 시도했습니다.")
-
+    print(f"총 약 {final_click_count}회 구매를 시도했습니다.")
     print("--- 상점 열기 시퀀스 완료 ---")
 
 
@@ -285,13 +352,9 @@ def open_post():
     """
     마을로 이동하여 우체통을 열고, 인벤토리를 열어 드래그하는 과정을 수행합니다.
     """
-    if not activate_maple_window():
+    # [수정] 공통 초기화 함수 호출
+    if not prepare_and_activate_window("우체통 열기"):
         return
-
-    print("\n--- 우체통 열기 시퀀스 시작 ---")
-    print("초기화 동작: ESC 5회 입력")
-    pyautogui.press('esc', presses=5, interval=0.1)
-    time.sleep(0.2)
 
     goto_village()
 

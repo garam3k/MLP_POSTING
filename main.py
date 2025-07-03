@@ -19,7 +19,8 @@ except ImportError:
 from config import GUI_CONFIG, RECEIPT_IMAGE_PATH, GLOBAL_CONFIDENCE, PAYMENT_IMAGE_PATH, POST_CONFIG
 from delivery import send_action, show_all_overlays_for_debugging
 from window_util import remove_window_border, resize_window, activate_maple_window
-from map_util import open_shop, open_post
+# prepare_and_activate_window 함수 임포트
+from map_util import open_shop, open_post, prepare_and_activate_window
 from post_util import click_receive_button
 import screen_utils
 from grid_cell_utils import click_randomly_in_cell
@@ -62,6 +63,8 @@ class AutomationApp:
         self.standard_amount_var = tk.StringVar(value="45000")
         self.express_amount_var = tk.StringVar(value="60000")
 
+        self.run_open_post_after_shop_var = tk.BooleanVar(value=True)
+
         self._setup_ui_layout()
         app_logger.info("UI layout setup complete.")
 
@@ -101,6 +104,18 @@ class AutomationApp:
         preset2_button = ttk.Button(window_control_frame, text="1900 x 300 (F4)",
                                     command=lambda: resize_window(1900, 300))
         preset2_button.pack(pady=2, fill=tk.X)
+
+        sequence_options_frame = ttk.LabelFrame(left_frame, text="F2 동작 설정", padding=10)
+        sequence_options_frame.pack(fill=tk.X, pady=(0, 10), anchor='n')
+
+        open_post_checkbox = ttk.Checkbutton(
+            sequence_options_frame,
+            text="상점 열기 후 우체통 자동 열기",
+            variable=self.run_open_post_after_shop_var,
+            onvalue=True,
+            offvalue=False
+        )
+        open_post_checkbox.pack(fill=tk.X)
 
         delivery_frame = ttk.LabelFrame(left_frame, text="배송", padding=10)
         delivery_frame.pack(fill=tk.X, anchor='n')
@@ -185,7 +200,6 @@ class AutomationApp:
             messagebox.showerror("저장 실패", f"DB에 저장하는 중 오류가 발생했습니다:\n{e}")
             print(f"🚨 수동 저장 중 오류 발생: {e}")
 
-    # [수정] F12 단축키에 의해 호출됩니다.
     def _toggle_f5_loop(self):
         """아이템 받기 루프의 시작/중단 상태를 토글합니다."""
         if self.is_f5_loop_running:
@@ -196,7 +210,6 @@ class AutomationApp:
             self.is_f5_loop_running = True
             threading.Thread(target=self._run_receive_sequence, daemon=True).start()
 
-    # [수정] F12 단축키에 의해 호출됩니다.
     def _run_receive_sequence(self):
         """아이템을 탐색하고 작업을 수행하는 시퀀스를 반복합니다."""
         if not activate_maple_window():
@@ -271,7 +284,6 @@ class AutomationApp:
                 print("\n[단축키 F1] 배송 시작 동작을 실행합니다.")
                 self.root.after(0, self._run_delivery)
             elif key == pynput_keyboard.Key.f2:
-                print("\n[단축키 F2] 상점 열기 -> 우체통 열기 순차 실행 시작...")
                 self.root.after(0, self._run_f2_sequence)
             elif key == pynput_keyboard.Key.f3:
                 print("\n[단축키 F3] 창 크기를 1366x768로 변경합니다.")
@@ -281,7 +293,6 @@ class AutomationApp:
                 self.root.after(0, lambda: resize_window(1900, 300))
             elif key == pynput_keyboard.Key.f5:
                 self.root.after(0, self._setup_window_preset_f5)
-            # [신규] F12 키에 '아이템 받기' 기능을 할당합니다.
             elif key == pynput_keyboard.Key.f12:
                 print("\n[단축키 F12] 아이템 받기 시작/중단을 토글합니다.")
                 self.root.after(0, self._toggle_f5_loop)
@@ -289,11 +300,20 @@ class AutomationApp:
             print(f"단축키 처리 중 오류 발생: {e}")
 
     def _run_f2_sequence(self):
-        print("\n[단축키 F2] 상점 열기 -> 우체통 열기 순차 실행 시작...")
+        """[수정] F2 단축키의 동작을 체크박스 값에 따라 분기하여 처리합니다."""
+        # '상점 열기'는 체크박스 상태와 관계없이 항상 먼저 실행됩니다.
         open_shop()
-        print("\n상점 열기 완료. 이어서 우체통 열기를 시작합니다.")
-        open_post()
-        print("\n[단축키 F2] 모든 동작이 완료되었습니다.")
+
+        if self.run_open_post_after_shop_var.get():
+            # 체크박스 ON: '우체통 열기'를 추가로 실행합니다.
+            print("\n'우체통 자동 열기' 옵션이 활성화되어 있어, 이어서 우체통 열기를 시작합니다.")
+            open_post()
+            print("\n[단축키 F2] 전체 동작(상점->우체통)이 완료되었습니다.")
+        else:
+            # 체크박스 OFF: '상점 열기' 완료 후, '창 초기화'를 추가로 실행합니다.
+            print("\n'우체통 자동 열기' 옵션이 비활성화되어 있어, 창 초기화를 추가로 수행합니다.")
+            prepare_and_activate_window("창 초기화")
+            print("\n[단축키 F2] 상점 열기 및 창 초기화 동작이 완료되었습니다.")
 
     def _setup_hotkeys(self):
         self.hotkey_listener = pynput_keyboard.Listener(on_press=self._handle_hotkey)
