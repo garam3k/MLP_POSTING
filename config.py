@@ -70,13 +70,16 @@ class SnifferConfig:
     interface: str = "이더넷"
     display_filter: str = 'tcp and data contains 04:00:30:00:00:00 and not data contains "Item" and data contains "-"'
 
+# [수정] WhisperParserConfig 클래스 정의 변경
 @dataclass(frozen=True)
 class WhisperParserConfig:
-    header_pattern: re.Pattern = re.compile(r'544f5a20....0000ffffffff02')
-    header_length: int = 106
+    # [신규] 고정된 텍스트로 헤더를 찾도록 변경
+    header_text: str = "98ac25cf01000000710000800d00000000"
+    # [신규] 헤더 텍스트를 찾은 후, 건너뛸 고정된 길이
+    skip_after_header: int = 20
+    # 데이터 패턴과 채널 패턴은 그대로 사용
     data_pattern: re.Pattern = re.compile(r'(.+?)0400..000000(.+?)0400..000000(.+?)040030000000')
     channel_pattern: re.Pattern = re.compile(r'[A-Z]-.\d*')
-    # [수정] 사운드 파일 경로를 'assets' 폴더 포함하도록 변경
     sound_file_path: str = "assets/alert.mp3"
 
 @dataclass(frozen=True)

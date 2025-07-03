@@ -4,10 +4,8 @@ from typing import Optional
 from playsound import playsound
 
 from config import WHISPER_PARSER_CONFIG
-# [신규] 로거 설정을 임포트합니다.
 from logger_setup import setup_whisper_logger
 
-# [신규] 파서 전용 로거를 가져옵니다.
 logger = setup_whisper_logger()
 
 
@@ -27,19 +25,20 @@ def _decode_hex_to_utf8(hex_string: str) -> str:
 
 
 def parse_from_payload(payload_hex: str) -> Optional[Whisper]:
-    """페이로드에서 헤더 패턴을 찾고, 고정된 헤더 길이만큼 건너뛴 후 파싱합니다."""
+    """[수정] 페이로드에서 고정 텍스트 헤더를 찾고, 지정된 길이만큼 건너뛴 후 파싱합니다."""
     cfg = WHISPER_PARSER_CONFIG
 
-    # [신규] 1. display_filter를 통과한 모든 메시지를 헤더 매칭 전에 로깅합니다.
     logger.debug(f"Received payload for parsing (len: {len(payload_hex)}): {payload_hex}")
 
-    header_match = cfg.header_pattern.search(payload_hex)
+    # [수정] 정규식 검색 대신, 고정된 텍스트(header_text)를 찾습니다.
+    header_start_index = payload_hex.find(cfg.header_text)
 
-    if not header_match:
+    # [수정] .find()는 텍스트를 못 찾으면 -1을 반환합니다.
+    if header_start_index == -1:
         return None
 
-    header_start_index = header_match.start()
-    content_start_index = header_start_index + cfg.header_length
+    # [수정] 콘텐츠 시작 위치를 (헤더 시작점 + 헤더 텍스트 길이 + 건너뛸 길이)로 계산합니다.
+    content_start_index = header_start_index + len(cfg.header_text) + cfg.skip_after_header
     content_payload = payload_hex[content_start_index:]
 
     match = cfg.data_pattern.search(content_payload)
@@ -54,14 +53,12 @@ def parse_from_payload(payload_hex: str) -> Optional[Whisper]:
         try:
             playsound(cfg.sound_file_path, block=False)
         except Exception as e:
-            # 기존 print 외에 에러 로그도 기록합니다.
             logger.error(f"Failed to play sound: {e}")
             print(f"🚨 효과음 재생 오류: {e}")
 
         decoded_name = _decode_hex_to_utf8(part_a)
         decoded_content = _decode_hex_to_utf8(part_c)
 
-        # [신규] 2. 귓속말 파싱 성공 시, 해당 내용을 로깅합니다.
         log_message = f"Whisper Parsed Successfully: Name='{decoded_name}', Channel='{decoded_channel}', Content='{decoded_content}'"
         logger.info(log_message)
 
