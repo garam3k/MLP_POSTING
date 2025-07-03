@@ -1,6 +1,8 @@
 # debug_overlay_util.py
-from PIL import Image, ImageDraw, ImageFont
 from typing import List, Tuple
+
+from PIL import Image, ImageDraw, ImageFont
+
 from screen_utils import Box
 
 Rect = Tuple[int, int, int, int]

@@ -1,8 +1,9 @@
 # screen_utils.py
-import pyautogui
 import time
 from pathlib import Path
 from typing import Optional, NamedTuple
+
+import pyautogui
 import pyperclip
 
 

@@ -1,14 +1,15 @@
 # map_util.py
-from typing import Optional, Callable
+import random
 import time
+from typing import Optional, Callable
+
 import pyautogui
 import pygetwindow as gw
-import random
 # [신규] pynput 라이브러리 임포트
 from pynput import keyboard as pynput_keyboard
 
-from config import ASSETS_DIR, GLOBAL_CONFIDENCE, DEWEY_CONFIG, DORAN_CONFIG, INVEN_SCAN_TARGET_IMAGE_PATH
 import screen_utils
+from config import ASSETS_DIR, GLOBAL_CONFIDENCE, DEWEY_CONFIG, DORAN_CONFIG, INVEN_SCAN_TARGET_IMAGE_PATH
 from grid_cell_utils import click_randomly_in_cell
 from window_util import WINDOW_TITLE, resize_window, activate_maple_window
 

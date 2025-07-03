@@ -1,9 +1,10 @@
 # window_util.py
-import win32gui
-import win32con
-import pygetwindow as gw
-from typing import Optional
 import time
+from typing import Optional
+
+import pygetwindow as gw
+import win32con
+import win32gui
 
 WINDOW_TITLE = 'MapleStory Worlds-Mapleland'
 

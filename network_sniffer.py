@@ -1,8 +1,10 @@
 # network_sniffer.py
-import pyshark
 from typing import Callable
 
+import pyshark
+
 from config import SNIFFER_CONFIG
+
 
 def start_sniffing(on_packet: Callable[[str], None]):
     """

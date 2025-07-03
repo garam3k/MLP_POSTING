@@ -1,8 +1,10 @@
 # grid_cell_utils.py
-import pyautogui
 import random
-from typing import List, Tuple, Optional
 from pathlib import Path
+from typing import List, Tuple, Optional
+
+import pyautogui
+
 from screen_utils import Box, find_image_in_region
 
 Cell = Tuple[int, int, int, int]

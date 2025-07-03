@@ -2,10 +2,9 @@
 import time
 from typing import List, Tuple, Optional
 
+import screen_utils
 from config import CLICK_DELAY_SECONDS, DELIVERY_BUTTONS, POST_CONFIG, WindowConfig, GLOBAL_CONFIDENCE
 from grid_cell_utils import click_randomly_in_cell, get_grid_cell_coords, click_randomly_in_grid_cell
-import screen_utils
-from screen_utils import Box
 
 Cell = Tuple[int, int, int, int]
 

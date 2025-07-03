@@ -1,9 +1,11 @@
 # firestore_service.py
-import firebase_admin
-from firebase_admin import credentials, firestore
 from typing import List, Dict, Any
 
+import firebase_admin
+from firebase_admin import credentials, firestore
+
 from config import FIRESTORE_CONFIG
+
 
 # [신규] Firestore 연결 실패 시 발생시킬 커스텀 예외 정의
 class FirestoreConnectionError(Exception):

@@ -1,13 +1,13 @@
 # main.py
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
-import sys
 import logging
-import pyautogui
-import time
-import random
+import sys
 import threading
+import time
+import tkinter as tk
+from tkinter import messagebox
+from tkinter import ttk
+
+import pyautogui
 from pynput import keyboard as pynput_keyboard
 
 try:

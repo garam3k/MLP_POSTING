@@ -1,9 +1,11 @@
 # whisper_service.py
-import threading
 import asyncio
-import whisper_parser # whisper_parser 모듈을 임포트
-from network_sniffer import start_sniffing
+import threading
+
+import whisper_parser  # whisper_parser 모듈을 임포트
 from firestore_service import FirestoreService
+from network_sniffer import start_sniffing
+
 
 class WhisperService:
     def __init__(self):

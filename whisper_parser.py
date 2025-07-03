@@ -1,6 +1,7 @@
 # whisper_parser.py
 from dataclasses import dataclass
 from typing import Optional
+
 from playsound import playsound
 
 from config import WHISPER_PARSER_CONFIG

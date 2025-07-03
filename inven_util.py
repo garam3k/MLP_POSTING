@@ -2,11 +2,9 @@
 import time
 from typing import Optional, List, Tuple
 
-from config import (WindowConfig, ScrollCheckConfig, INVEN_SCAN_TARGET_IMAGE_PATH,
-                    GLOBAL_CONFIDENCE, CLICK_DELAY_SECONDS, INVEN_SCROLL_CONFIG)
-from grid_cell_utils import get_grid_cell_coords, click_randomly_in_grid_cell
 import screen_utils
-from screen_utils import Box
+from config import (WindowConfig, ScrollCheckConfig, GLOBAL_CONFIDENCE, CLICK_DELAY_SECONDS, INVEN_SCROLL_CONFIG)
+from grid_cell_utils import get_grid_cell_coords, click_randomly_in_grid_cell
 
 Cell = Tuple[int, int, int, int]
 
