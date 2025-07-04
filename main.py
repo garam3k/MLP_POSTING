@@ -90,14 +90,12 @@ class AutomationApp:
         self.root.geometry(geometry_string)
         self.root.resizable(True, True)
 
-        # [수정] WhisperService와 GUI 간의 통신을 위한 큐 생성
         self.whisper_queue = queue.Queue()
 
         app_logger.info("Initializing services...")
         self.firestore_service = FirestoreService()
         app_logger.info("FirestoreService initialized successfully.")
 
-        # [수정] WhisperService에 큐를 전달
         self.whisper_service = WhisperService(self.whisper_queue)
         app_logger.info("WhisperService initialized.")
         self.whisper_service.start()
@@ -111,6 +109,7 @@ class AutomationApp:
         style.configure("Outline.TButton", padding=2)
 
         self.delivery_type_var = tk.StringVar(value="standard")
+        self.set_count_var = tk.IntVar(value=1)  # 세트 수 저장을 위한 변수
         self.receiver_var = tk.StringVar(value="")
         self.standard_amount_var = tk.StringVar(value="45000")
         self.express_amount_var = tk.StringVar(value="60000")
@@ -120,7 +119,6 @@ class AutomationApp:
         self._setup_ui_layout()
         app_logger.info("UI layout setup complete.")
 
-        # [신규] 실시간 로그 창 생성 및 시작
         self.whisper_log_window = WhisperLogWindow(self.root, self.whisper_queue)
         self.whisper_log_window.process_queue()
         app_logger.info("Whisper log window initialized and started.")
@@ -154,6 +152,7 @@ class AutomationApp:
 
         delivery_frame = ttk.LabelFrame(left_frame, text="배송", padding=10)
         delivery_frame.pack(fill=tk.X, anchor='n')
+
         delivery_type_frame = ttk.Frame(delivery_frame, padding=(0, 5))
         delivery_type_frame.pack(fill=tk.X)
         ttk.Label(delivery_type_frame, text="유형:").pack(side=tk.LEFT, padx=(0, 10))
@@ -163,6 +162,18 @@ class AutomationApp:
         express_radio = ttk.Radiobutton(delivery_type_frame, text="Express", variable=self.delivery_type_var,
                                         value="express")
         express_radio.pack(side=tk.LEFT, padx=5)
+
+        # --- 세트 수 선택 라디오 버튼 추가 ---
+        set_count_frame = ttk.Frame(delivery_frame, padding=(0, 5))
+        set_count_frame.pack(fill=tk.X)
+        ttk.Label(set_count_frame, text="세트수:").pack(side=tk.LEFT, padx=(0, 10))
+        for i in [1, 2, 3]:
+            ttk.Radiobutton(
+                set_count_frame,
+                text=str(i),
+                variable=self.set_count_var,
+                value=i
+            ).pack(side=tk.LEFT, padx=5)
 
         receiver_frame = ttk.Frame(delivery_frame, padding=(0, 5))
         receiver_frame.pack(fill=tk.X)
@@ -218,11 +229,9 @@ class AutomationApp:
     def _save_receiver_as_whisper(self):
         """'수신인' 입력창의 닉네임을 DB에 저장합니다. 내용은 '수동저장'으로 고정됩니다."""
         name = self.receiver_var.get()
-
         if not name:
             messagebox.showwarning("입력 오류", "저장할 수신인 닉네임을 입력해주세요.")
             return
-
         try:
             self.firestore_service.add_whisper(name=name, channel="수동입력", comment="수동저장")
             print(f"✅ 수동 저장 완료: {name} / 수동저장")
@@ -246,14 +255,12 @@ class AutomationApp:
         if not activate_maple_window():
             self.is_f5_loop_running = False
             return
-
         try:
             for i in range(100):
                 if not self.is_f5_loop_running:
                     print("사용자 요청에 의해 아이템 받기 루프를 중단했습니다.")
                     break
                 print(f"\n--- 아이템 받기 시작 ({i + 1}/100) ---")
-
                 payment_location = None
                 search_start_time = time.time()
                 post_base_location = screen_utils.find_image_on_screen(POST_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
@@ -275,14 +282,12 @@ class AutomationApp:
                 if not payment_location:
                     print("시간 초과: 다음 아이템을 찾지 못해 루프를 종료합니다.")
                     break
-
                 click_randomly_in_cell(
                     payment_location.left, payment_location.top,
                     payment_location.width, payment_location.height
                 )
                 time.sleep(0.1)
                 click_receive_button()
-
                 receipt_start_time = time.time()
                 receipt_found = False
                 while time.time() - receipt_start_time < 5:
@@ -333,16 +338,12 @@ class AutomationApp:
 
     def _run_f2_sequence(self):
         """[수정] F2 단축키의 동작을 체크박스 값에 따라 분기하여 처리합니다."""
-        # '상점 열기'는 체크박스 상태와 관계없이 항상 먼저 실행됩니다.
         open_shop()
-
         if self.run_open_post_after_shop_var.get():
-            # 체크박스 ON: '우체통 열기'를 추가로 실행합니다.
             print("\n'우체통 자동 열기' 옵션이 활성화되어 있어, 이어서 우체통 열기를 시작합니다.")
             open_post()
             print("\n[단축키 F2] 전체 동작(상점->우체통)이 완료되었습니다.")
         else:
-            # 체크박스 OFF: '상점 열기' 완료 후, '창 초기화'를 추가로 실행합니다.
             print("\n'우체통 자동 열기' 옵션이 비활성화되어 있어, 창 초기화를 추가로 수행합니다.")
             prepare_and_activate_window("창 초기화")
             print("\n[단축키 F2] 상점 열기 및 창 초기화 동작이 완료되었습니다.")
@@ -389,8 +390,8 @@ class AutomationApp:
         print(f"🖋️ 수신인에 '{nickname}'이(가) 입력되었습니다.")
 
     def _run_delivery(self):
-        """배송 작업을 수행하는 일련의 과정을 자동화합니다."""
-        # --- F1 실행 조건 검사 ---
+        """[수정됨] 선택한 세트 수만큼 배송 작업을 반복 수행합니다."""
+        # --- 1. 초기 설정 및 파라미터 확인 (반복 전 1회 실행) ---
         print("F1 조건 확인: post.png와 inven.png를 찾습니다...")
         post_loc = screen_utils.find_image_on_screen(POST_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
         inven_loc = screen_utils.find_image_on_screen(INVEN_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
@@ -402,26 +403,24 @@ class AutomationApp:
         print(f"두 이미지 모두 찾았습니다: post={post_loc}, inven={inven_loc}")
 
         x_diff = abs(post_loc.left - inven_loc.left)
-        print(f"좌표 X 차이: {x_diff}")
-
         if x_diff < 845:
             print(f"좌표 X 차이({x_diff})가 845 미만이므로 인벤토리 위치를 조정합니다.")
-
             h_margin = inven_loc.width * 0.2
             v_margin = inven_loc.height * 0.2
-
             click_x = random.randint(int(inven_loc.left + h_margin), int(inven_loc.left + inven_loc.width - h_margin))
             click_y = random.randint(int(inven_loc.top + v_margin), int(inven_loc.top + inven_loc.height - v_margin))
-
             pyautogui.moveTo(click_x, click_y, duration=0.2)
             pyautogui.dragRel(150, 0, duration=0.5)
             print(f"인벤토리 드래그 완료: ({click_x}, {click_y}) -> (+150, 0)")
             time.sleep(0.3)
 
         if not activate_maple_window(): return
+
+        num_sets = self.set_count_var.get()
         delivery_type = self.delivery_type_var.get()
         receiver_name = self.receiver_var.get()
         amount = self.standard_amount_var.get() if delivery_type == "standard" else self.express_amount_var.get()
+
         if not receiver_name:
             messagebox.showwarning("입력 오류", "배송 수신인 이름을 입력해주세요.")
             return
@@ -429,17 +428,27 @@ class AutomationApp:
             messagebox.showwarning("입력 오류", "금액은 숫자만 입력 가능합니다.")
             return
 
-        try:
-            # [수정] send_action의 결과(True/False)를 받아 후속 조치 결정
-            success = send_action(delivery_type, receiver_name, amount)
-            if success:
-                print(f"정보: 배송 작업 완료! 유형: {delivery_type}, 수신인: {receiver_name}, 금액: {amount}")
-            else:
-                # 재고 부족 또는 기타 오류로 배송 실패 시 F2 동작 실행
-                print("배송 실패(재고 부족). 상점을 엽니다.")
-                open_shop()
-        except Exception as e:
-            print(f"오류: 자동화 중 오류 발생: {e}")
+        print(f"총 {num_sets}세트 발송을 시작합니다. 수신인: {receiver_name}")
+
+        # --- 2. 세트 수만큼 배송 반복 ---
+        for i in range(num_sets):
+            print(f"\n--- {i + 1}/{num_sets} 세트 발송 중 ---")
+            try:
+                success = send_action(delivery_type, receiver_name, amount)
+                if success:
+                    print(f"정보: {i + 1}번째 세트 배송 작업 완료!")
+                    if i < num_sets - 1:  # 마지막 세트가 아니라면
+                        print("다음 세트 발송을 위해 1.5초 대기합니다.")
+                        time.sleep(1.5)
+                else:
+                    print("배송 실패(재고 부족 또는 오류 발생). F2(상점 열기) 동작을 실행하고 모든 발송을 중단합니다.")
+                    open_shop()
+                    return  # 실패 시 전체 반복 중단
+            except Exception as e:
+                print(f"오류: 자동화 중 오류 발생: {e}. 모든 발송을 중단합니다.")
+                return
+
+        print(f"\n--- 총 {num_sets}세트 발송 작업이 모두 완료되었습니다. ---")
 
     def _run_overlay_debug(self):
         if not activate_maple_window(): return
@@ -458,15 +467,11 @@ if __name__ == "__main__":
         root = tk.Tk()
         root.withdraw()
         app_logger.info("Root Tk window created and withdrawn.")
-
         app = AutomationApp(root)
-
         app_logger.info("AutomationApp initialization successful. Showing GUI window.")
         root.deiconify()
-
         app_logger.info("Starting Tkinter main loop.")
         root.mainloop()
-
     except (FirestoreConnectionError, Exception) as e:
         app_logger.critical("A fatal error occurred during application startup. GUI cannot be displayed.",
                             exc_info=True)

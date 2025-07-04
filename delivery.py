@@ -6,22 +6,25 @@ import pyautogui
 
 import screen_utils
 from config import (INVEN_CONFIG, POST_CONFIG, CLICK_DELAY_SECONDS, OVERLAY_CONFIG,
-                    GLOBAL_CONFIDENCE, INVEN_SCAN_TARGET_IMAGE_PATH)
+                    GLOBAL_CONFIDENCE, INVEN_SCAN_TARGET_IMAGE_PATH, SEND_CHECK1_IMAGE_PATH, SEND_CHECK2_IMAGE_PATH)
 from debug_overlay_util import draw_rects_on_image, draw_base_info_on_image
-from grid_cell_utils import scan_grid_for_image
-# [수정] inven_util의 새로운 함수 임포트
+from grid_cell_utils import scan_grid_for_image, click_randomly_in_cell
 from inven_util import get_inven_grid_cells, click_inven_grid_cell, find_item_by_scrolling
 from post_util import click_delivery_button, get_post_grid_cells, click_post_grid_cell, get_delivery_button_rects
 from screen_utils import paste_text
 
 
 def _fill_post_with_items() -> bool:
-    """우편함이 가득 찰 때까지 인벤토리에서 아이템을 옮깁니다. 성공 시 True, 재고 부족 시 False를 반환합니다."""
-    MAX_ATTEMPTS = 50  # 아이템을 하나씩 옮기므로, 최대 50번 시도 후 중단
+    """
+    [수정됨] 우편함이 가득 찰 때까지 인벤토리에서 아이템을 옮깁니다.
+    화면을 한 번 스캔하여 옮길 수 있는 모든 아이템을 한 번에 옮겨 성능을 개선합니다.
+    성공 시 True, 재고 부족 시 False를 반환합니다.
+    """
+    MAX_ATTEMPTS = 10  # 화면 전체를 스캔하고 옮기는 작업을 최대 10번 시도
     for attempt in range(MAX_ATTEMPTS):
         print(f"\n--- 우편 채우기 시도 ({attempt + 1}/{MAX_ATTEMPTS}) ---")
 
-        # 1. Post 그리드의 빈 칸 확인
+        # 1. Post 그리드의 빈 칸을 모두 확인
         post_grid_cells = get_post_grid_cells(POST_CONFIG)
         if not post_grid_cells:
             print("오류: 우편 그리드를 찾을 수 없습니다.")
@@ -36,7 +39,7 @@ def _fill_post_with_items() -> bool:
 
         print(f"우편 그리드에 {len(empty_post_indices)}개의 빈 칸이 있습니다.")
 
-        # 2. Inven 그리드에서 아이템 확인
+        # 2. 현재 보이는 Inven 그리드에서 아이템을 모두 확인
         inven_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
         if not inven_grid_cells:
             print("오류: 인벤토리 그리드를 찾을 수 없습니다.")
@@ -45,23 +48,52 @@ def _fill_post_with_items() -> bool:
         found_in_inven = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, inven_grid_cells, GLOBAL_CONFIDENCE)
         available_inven_indices = [i for i, loc in enumerate(found_in_inven) if loc is not None]
 
+        # 3. 인벤토리에 아이템이 보이면, 옮길 수 있는 만큼 한 번에 모두 옮기기
         if available_inven_indices:
-            # 3. 인벤토리에 아이템이 보이면 하나 옮기기
-            inven_idx_to_click = available_inven_indices[0]
-            post_idx_to_click = empty_post_indices[0]
-            print(f"아이템 이동: Inven Cell #{inven_idx_to_click} -> Post Cell #{post_idx_to_click}")
-            click_inven_grid_cell(inven_idx_to_click, inven_grid_cells)
-            click_post_grid_cell(post_idx_to_click, post_grid_cells)
+            num_to_move = min(len(empty_post_indices), len(available_inven_indices))
+            print(f"인벤토리에서 {len(available_inven_indices)}개 아이템 발견. {num_to_move}개를 우편함으로 옮깁니다.")
+
+            for i in range(num_to_move):
+                inven_idx_to_click = available_inven_indices[i]
+                post_idx_to_click = empty_post_indices[i]
+
+                # 아이템 이동: 인벤토리 클릭 -> 우편함 클릭
+                click_inven_grid_cell(inven_idx_to_click, inven_grid_cells)
+                click_post_grid_cell(post_idx_to_click, post_grid_cells)
+
+            # 아이템을 옮긴 후 상태가 변경되었으므로, 다음 시도를 위해 루프의 처음으로 돌아감
+            continue
+
+        # 4. 현재 인벤토리 뷰에 아이템이 없으면 스크롤해서 찾기
         else:
-            # 4. 인벤토리에 아이템이 안 보이면 스크롤해서 찾기
             print("현재 인벤토리 뷰에 아이템이 없습니다. 스크롤하여 탐색합니다...")
             if not find_item_by_scrolling(INVEN_SCAN_TARGET_IMAGE_PATH):
-                # 스크롤해도 아이템이 없으면 재고 부족으로 판단하고 실패 반환
+                # 스크롤해도 아이템이 없으면 재고 부족으로 최종 판단
                 print("재고 부족: 인벤토리를 모두 탐색했으나 아이템을 찾지 못했습니다.")
                 return False
-            # 스크롤 후 아이템을 찾았으므로, 다음 루프에서 옮길 것임
+
+            # 스크롤 성공 시, 다음 시도에서 아이템을 찾아 옮길 것임
+            continue
 
     print(f"오류: 최대 시도 횟수({MAX_ATTEMPTS})를 초과했습니다. 우편을 채우지 못했습니다.")
+    return False
+
+
+def _wait_and_click_confirm(image_path: Path, timeout: int, description: str) -> bool:
+    """지정된 시간 동안 확인창 이미지를 기다려 클릭하고 Enter를 누릅니다."""
+    print(f"확인창 대기 중: '{description}' (최대 {timeout}초)...")
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        location = screen_utils.find_image_on_screen(image_path, confidence=GLOBAL_CONFIDENCE)
+        if location:
+            print(f"'{description}' 확인창 발견. 클릭 후 Enter 입력.")
+            click_randomly_in_cell(location.left, location.top, location.width, location.height)
+            time.sleep(0.2)
+            pyautogui.press('enter')
+            return True
+        time.sleep(0.2)
+
+    print(f"오류: 시간 초과({timeout}초). '{description}' 확인창을 찾지 못했습니다.")
     return False
 
 
@@ -83,11 +115,9 @@ def send_action(delivery_type: str, receiver_name: str, amount: str) -> bool:
     print(f"수신인 입력 완료: {receiver_name}")
     time.sleep(CLICK_DELAY_SECONDS / 2)
 
-    # [수정] 새로운 아이템 이전 로직을 호출하고, 실패 시 즉시 False 반환
     if not _fill_post_with_items():
         return False
 
-    # 아이템을 12개 모두 채웠을 때만 아래 로직 실행
     print("우편함이 가득 찼습니다. 발송 절차를 계속 진행합니다.")
     print("'요청' 버튼 클릭 중...")
     click_delivery_button("request")
@@ -106,6 +136,14 @@ def send_action(delivery_type: str, receiver_name: str, amount: str) -> bool:
     print("'보내기' 버튼 클릭 중...")
     click_delivery_button("send")
     time.sleep(CLICK_DELAY_SECONDS)
+
+    # 1차 확인창 처리 (10초 타임아웃)
+    if not _wait_and_click_confirm(SEND_CHECK1_IMAGE_PATH, timeout=10, description="1차 확인"):
+        return False
+
+    # 2차 최종 확인창 처리 (20초 타임아웃)
+    if not _wait_and_click_confirm(SEND_CHECK2_IMAGE_PATH, timeout=20, description="최종 확인"):
+        return False
 
     print("--- 발송 작업 완료 ---")
     return True
