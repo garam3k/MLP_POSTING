@@ -1,5 +1,6 @@
 # delivery.py
 import time
+from pathlib import Path
 
 import pyautogui
 
@@ -8,120 +9,86 @@ from config import (INVEN_CONFIG, POST_CONFIG, CLICK_DELAY_SECONDS, OVERLAY_CONF
                     GLOBAL_CONFIDENCE, INVEN_SCAN_TARGET_IMAGE_PATH)
 from debug_overlay_util import draw_rects_on_image, draw_base_info_on_image
 from grid_cell_utils import scan_grid_for_image
-# [수정] get_inven_grid_cells를 직접 호출하기 위해 임포트
-from inven_util import get_inven_grid_cells, click_inven_grid_cell
+# [수정] inven_util의 새로운 함수 임포트
+from inven_util import get_inven_grid_cells, click_inven_grid_cell, find_item_by_scrolling
 from post_util import click_delivery_button, get_post_grid_cells, click_post_grid_cell, get_delivery_button_rects
 from screen_utils import paste_text
 
 
-def _verify_and_fill_post_grid():
-    """우편 그리드(B)가 가득 찼는지 확인하고, 비어있다면 인벤토리(A)의 아이템으로 마저 채웁니다."""
-    print("\n--- 우편 그리드 검증 및 채우기 시작 ---")
+def _fill_post_with_items() -> bool:
+    """우편함이 가득 찰 때까지 인벤토리에서 아이템을 옮깁니다. 성공 시 True, 재고 부족 시 False를 반환합니다."""
+    MAX_ATTEMPTS = 50  # 아이템을 하나씩 옮기므로, 최대 50번 시도 후 중단
+    for attempt in range(MAX_ATTEMPTS):
+        print(f"\n--- 우편 채우기 시도 ({attempt + 1}/{MAX_ATTEMPTS}) ---")
 
-    b_grid_cells = get_post_grid_cells(POST_CONFIG)
-    if not b_grid_cells:
-        print("오류: 우편 그리드를 찾을 수 없어 검증을 중단합니다.")
-        return
+        # 1. Post 그리드의 빈 칸 확인
+        post_grid_cells = get_post_grid_cells(POST_CONFIG)
+        if not post_grid_cells:
+            print("오류: 우편 그리드를 찾을 수 없습니다.")
+            return False
 
-    print(f"B 그리드에서 '{INVEN_SCAN_TARGET_IMAGE_PATH.name}' 스캔하여 빈칸을 확인합니다...")
-    found_b_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, b_grid_cells, GLOBAL_CONFIDENCE)
-    empty_b_indices = [i for i, loc in enumerate(found_b_locations) if loc is None]
+        found_in_post = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, post_grid_cells, GLOBAL_CONFIDENCE)
+        empty_post_indices = [i for i, loc in enumerate(found_in_post) if loc is None]
 
-    if not empty_b_indices:
-        print("✅ 검증 완료: 우편 그리드의 모든 칸(12개)이 정상적으로 채워져 있습니다.")
-        return
+        if not empty_post_indices:
+            print("성공: 우편 그리드가 모두 채워졌습니다.")
+            return True
 
-    print(f"경고: 우편 그리드에 {len(empty_b_indices)}개의 빈 칸이 있습니다. 추가 채우기 작업을 시작합니다.")
+        print(f"우편 그리드에 {len(empty_post_indices)}개의 빈 칸이 있습니다.")
 
-    # [리팩토링] inven_util.perform_inven_grid_actions() 대신 직접 로직 수행
-    a_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
-    if not a_grid_cells:
-        print("오류: 인벤토리 정보를 가져올 수 없어 채우기 작업을 중단합니다.")
-        return
+        # 2. Inven 그리드에서 아이템 확인
+        inven_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
+        if not inven_grid_cells:
+            print("오류: 인벤토리 그리드를 찾을 수 없습니다.")
+            return False
 
-    item_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, a_grid_cells, GLOBAL_CONFIDENCE)
-    available_a_indices = [i for i, loc in enumerate(item_locations) if loc is not None]
+        found_in_inven = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, inven_grid_cells, GLOBAL_CONFIDENCE)
+        available_inven_indices = [i for i, loc in enumerate(found_in_inven) if loc is not None]
 
-    if not available_a_indices:
-        print("오류: 인벤토리에 더 이상 옮길 아이템이 없어 채우기를 중단합니다.")
-        return
+        if available_inven_indices:
+            # 3. 인벤토리에 아이템이 보이면 하나 옮기기
+            inven_idx_to_click = available_inven_indices[0]
+            post_idx_to_click = empty_post_indices[0]
+            print(f"아이템 이동: Inven Cell #{inven_idx_to_click} -> Post Cell #{post_idx_to_click}")
+            click_inven_grid_cell(inven_idx_to_click, inven_grid_cells)
+            click_post_grid_cell(post_idx_to_click, post_grid_cells)
+        else:
+            # 4. 인벤토리에 아이템이 안 보이면 스크롤해서 찾기
+            print("현재 인벤토리 뷰에 아이템이 없습니다. 스크롤하여 탐색합니다...")
+            if not find_item_by_scrolling(INVEN_SCAN_TARGET_IMAGE_PATH):
+                # 스크롤해도 아이템이 없으면 재고 부족으로 판단하고 실패 반환
+                print("재고 부족: 인벤토리를 모두 탐색했으나 아이템을 찾지 못했습니다.")
+                return False
+            # 스크롤 후 아이템을 찾았으므로, 다음 루프에서 옮길 것임
 
-    print(f"인벤토리에서 옮길 수 있는 아이템 {len(available_a_indices)}개를 추가로 찾았습니다.")
-
-    num_to_fill = min(len(available_a_indices), len(empty_b_indices))
-    print(f"총 {num_to_fill}개의 아이템을 추가로 옮깁니다.")
-
-    for i in range(num_to_fill):
-        a_idx_to_click = available_a_indices[i]
-        b_idx_to_click = empty_b_indices[i]
-
-        print(f"⏩ 추가 적재: A-Grid #{a_idx_to_click} -> B-Grid #{b_idx_to_click}")
-        click_inven_grid_cell(a_idx_to_click, a_grid_cells)
-        click_post_grid_cell(b_idx_to_click, b_grid_cells)
-
-    print("--- 우편 그리드 채우기 완료 ---")
-
-
-def _transfer_items_initial():
-    """[이름 변경] 인벤토리(A)와 우편(B) 그리드를 번갈아 클릭하여 1차 아이템 이전을 수행합니다."""
-    print("--- 1차 아이템 이전 시작 ---")
-
-    # [리팩토링] inven_util.perform_inven_grid_actions() 대신 직접 로직 수행
-    a_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
-    if not a_grid_cells:
-        print("인벤토리 그리드 데이터를 가져올 수 없습니다. 중단합니다.")
-        return
-
-    print(f"A 그리드에서 '{INVEN_SCAN_TARGET_IMAGE_PATH.name}' 스캔 중...")
-    item_locations = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, a_grid_cells, GLOBAL_CONFIDENCE)
-    a_cells_to_click = [i for i, loc in enumerate(item_locations) if loc is not None]
-
-    b_grid_cells = get_post_grid_cells(POST_CONFIG)
-    if not b_grid_cells:
-        print("우편 그리드 데이터를 가져올 수 없습니다. 중단합니다.")
-        return
-
-    print("\n--- A, B 그리드 교차 클릭 시작 ---")
-    max_iterations = min(len(a_cells_to_click), len(b_grid_cells))
-    print(f"최대 클릭 반복: {max_iterations}회")
-
-    for i in range(max_iterations):
-        a_cell_idx = a_cells_to_click[i]
-        print(f"⏩ A-Grid 클릭: 셀 #{a_cell_idx}...")
-        click_inven_grid_cell(a_cell_idx, a_grid_cells)
-
-        b_cell_idx = i
-        print(f"⏩ B-Grid 클릭: 셀 #{b_cell_idx}...")
-        click_post_grid_cell(b_cell_idx, b_grid_cells)
-        print(f"--- 반복 {i + 1}/{max_iterations} 완료 ---")
-
-    print(f"\n--- 1차 아이템 이전 완료 ({max_iterations}회 반복) ---")
+    print(f"오류: 최대 시도 횟수({MAX_ATTEMPTS})를 초과했습니다. 우편을 채우지 못했습니다.")
+    return False
 
 
-def send_action(delivery_type: str, receiver_name: str, amount: str):
-    """배송 작업을 수행하는 일련의 과정을 자동화합니다."""
+def send_action(delivery_type: str, receiver_name: str, amount: str) -> bool:
+    """배송 작업을 수행하는 일련의 과정을 자동화합니다. 성공 시 True, 실패(재고 부족 등) 시 False를 반환합니다."""
     print(f"\n--- 발송 작업 시작: 유형='{delivery_type}', 수신인='{receiver_name}', 금액='{amount}' ---")
 
     if delivery_type not in ["standard", "express"]:
         print(f"오류: 잘못된 배송 유형 '{delivery_type}'.")
-        return
+        return False
 
     click_delivery_button(delivery_type)
-    time.sleep(CLICK_DELAY_SECONDS/2)
+    time.sleep(CLICK_DELAY_SECONDS / 2)
 
     print("'수신인' 버튼 클릭 후 이름 입력 중...")
     click_delivery_button("receiver")
-    time.sleep(CLICK_DELAY_SECONDS/2)
+    time.sleep(CLICK_DELAY_SECONDS / 2)
     paste_text(receiver_name)
     print(f"수신인 입력 완료: {receiver_name}")
-    time.sleep(CLICK_DELAY_SECONDS/2)
+    time.sleep(CLICK_DELAY_SECONDS / 2)
 
-    # [이름 변경] 워크플로우 함수 호출
-    _transfer_items_initial()
+    # [수정] 새로운 아이템 이전 로직을 호출하고, 실패 시 즉시 False 반환
+    if not _fill_post_with_items():
+        return False
 
-    _verify_and_fill_post_grid()
-    time.sleep(CLICK_DELAY_SECONDS)
-
+    # 아이템을 12개 모두 채웠을 때만 아래 로직 실행
+    print("우편함이 가득 찼습니다. 발송 절차를 계속 진행합니다.")
     print("'요청' 버튼 클릭 중...")
     click_delivery_button("request")
     time.sleep(CLICK_DELAY_SECONDS)
@@ -141,6 +108,7 @@ def send_action(delivery_type: str, receiver_name: str, amount: str):
     time.sleep(CLICK_DELAY_SECONDS)
 
     print("--- 발송 작업 완료 ---")
+    return True
 
 
 def show_all_overlays_for_debugging():
@@ -155,14 +123,12 @@ def show_all_overlays_for_debugging():
         return
 
     print("[1/3] 인벤토리(A 그리드) 정보 그리기...")
-    # [리팩토링] inven_util.perform_inven_grid_actions() 대신 직접 로직 수행
     a_grid_cells = get_inven_grid_cells(INVEN_CONFIG)
     if a_grid_cells:
         screenshot = draw_rects_on_image(screenshot, a_grid_cells, OVERLAY_CONFIG.color_grid_a,
                                          OVERLAY_CONFIG.thickness)
 
         item_locations_boxes = scan_grid_for_image(INVEN_SCAN_TARGET_IMAGE_PATH, a_grid_cells, GLOBAL_CONFIDENCE)
-        # scan_grid_for_image가 Box 객체 또는 None의 리스트를 반환한다고 가정
         item_locations_found = [loc for loc in item_locations_boxes if loc is not None]
 
         if item_locations_found:

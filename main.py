@@ -1,9 +1,12 @@
 # main.py
 import logging
+import queue
+import random
 import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.scrolledtext as scrolledtext
 from tkinter import messagebox
 from tkinter import ttk
 
@@ -16,7 +19,8 @@ except ImportError:
     def setup_file_logger(name, file):
         return logging.getLogger(name)
 
-from config import GUI_CONFIG, RECEIPT_IMAGE_PATH, GLOBAL_CONFIDENCE, PAYMENT_IMAGE_PATH, POST_CONFIG
+# [수정] INVEN_CONFIG 임포트 추가
+from config import GUI_CONFIG, RECEIPT_IMAGE_PATH, GLOBAL_CONFIDENCE, PAYMENT_IMAGE_PATH, POST_CONFIG, INVEN_CONFIG
 from delivery import send_action, show_all_overlays_for_debugging
 from window_util import remove_window_border, resize_window, activate_maple_window
 # prepare_and_activate_window 함수 임포트
@@ -24,10 +28,54 @@ from map_util import open_shop, open_post, prepare_and_activate_window
 from post_util import click_receive_button
 import screen_utils
 from grid_cell_utils import click_randomly_in_cell
-from whisper_service import WhisperService
+from whisper_service import WhisperService, Whisper
 from firestore_service import FirestoreService, FirestoreConnectionError
 
 app_logger = setup_file_logger('app_main', 'app_main.log')
+
+
+# [신규] 실시간 귓속말 로그를 표시하는 새 창 클래스
+class WhisperLogWindow(tk.Toplevel):
+    def __init__(self, parent, whisper_queue: queue.Queue):
+        """
+        Args:
+            parent: 부모 윈도우 (메인 앱의 root)
+            whisper_queue: 귓속말 데이터를 수신할 큐
+        """
+        super().__init__(parent)
+        self.title("실시간 귓속말 로그")
+        self.geometry("600x400+0+50")  # 메인 창 근처에 위치하도록 좌표 설정
+        self.queue = whisper_queue
+        self.parent = parent
+
+        # 스크롤 가능한 텍스트 위젯 생성
+        self.log_text = scrolledtext.ScrolledText(self, state='disabled', wrap=tk.WORD, font=("Consolas", 10))
+        self.log_text.pack(expand=True, fill=tk.BOTH)
+
+        # 창이 닫힐 때의 동작 설정
+        self.protocol("WM_DELETE_WINDOW", self.withdraw)
+
+    def add_whisper_log(self, whisper: Whisper):
+        """로그 텍스트 위젯에 귓속말을 추가합니다."""
+        self.log_text.config(state='normal')
+        timestamp = time.strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] {whisper.channel} | {whisper.name}: {whisper.content}\n"
+        self.log_text.insert(tk.END, log_entry)
+        self.log_text.config(state='disabled')
+        self.log_text.see(tk.END)  # 항상 마지막 줄이 보이도록 자동 스크롤
+
+    def process_queue(self):
+        """큐를 주기적으로 확인하여 새 귓속말이 있으면 화면에 표시합니다."""
+        try:
+            # 큐에서 non-blocking 방식으로 아이템 가져오기
+            whisper = self.queue.get_nowait()
+            self.add_whisper_log(whisper)
+        except queue.Empty:
+            # 큐가 비어있으면 아무것도 하지 않음
+            pass
+        finally:
+            # 100ms 후에 다시 이 함수를 호출
+            self.after(100, self.process_queue)
 
 
 class AutomationApp:
@@ -42,11 +90,15 @@ class AutomationApp:
         self.root.geometry(geometry_string)
         self.root.resizable(True, True)
 
+        # [수정] WhisperService와 GUI 간의 통신을 위한 큐 생성
+        self.whisper_queue = queue.Queue()
+
         app_logger.info("Initializing services...")
         self.firestore_service = FirestoreService()
         app_logger.info("FirestoreService initialized successfully.")
 
-        self.whisper_service = WhisperService()
+        # [수정] WhisperService에 큐를 전달
+        self.whisper_service = WhisperService(self.whisper_queue)
         app_logger.info("WhisperService initialized.")
         self.whisper_service.start()
         app_logger.info("WhisperService background thread started.")
@@ -68,6 +120,11 @@ class AutomationApp:
         self._setup_ui_layout()
         app_logger.info("UI layout setup complete.")
 
+        # [신규] 실시간 로그 창 생성 및 시작
+        self.whisper_log_window = WhisperLogWindow(self.root, self.whisper_queue)
+        self.whisper_log_window.process_queue()
+        app_logger.info("Whisper log window initialized and started.")
+
         self._setup_hotkeys()
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
@@ -79,32 +136,10 @@ class AutomationApp:
         left_frame = ttk.Frame(main_frame)
         left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
-        right_frame = ttk.LabelFrame(main_frame, text="최근 귓속말 (고유 닉네임 15명)", padding=10)
+        right_frame = ttk.LabelFrame(main_frame, text="최근 귓속말 (고유 닉네임 10명)", padding=10)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         # --- 왼쪽 프레임 ---
-        top_control_frame = ttk.Frame(left_frame)
-        top_control_frame.pack(fill=tk.X, pady=(0, 10), anchor='n')
-
-        macro_frame = ttk.LabelFrame(top_control_frame, text="기능 실행", padding=10)
-        macro_frame.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        shop_button = ttk.Button(macro_frame, text="상점 열기 (F2-1)", command=open_shop)
-        shop_button.pack(pady=2, fill=tk.X)
-        post_button = ttk.Button(macro_frame, text="우체통 열기 (F2-2)", command=open_post)
-        post_button.pack(pady=2, fill=tk.X)
-
-        self.f5_preset_button = ttk.Button(macro_frame, text="창 설정 (F5)", command=self._setup_window_preset_f5)
-        self.f5_preset_button.pack(pady=2, fill=tk.X)
-
-        window_control_frame = ttk.LabelFrame(top_control_frame, text="창 크기 조절", padding=10)
-        window_control_frame.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
-        preset1_button = ttk.Button(window_control_frame, text="1366 x 768 (F3)",
-                                    command=lambda: resize_window(1366, 768))
-        preset1_button.pack(pady=2, fill=tk.X)
-        preset2_button = ttk.Button(window_control_frame, text="1900 x 300 (F4)",
-                                    command=lambda: resize_window(1900, 300))
-        preset2_button.pack(pady=2, fill=tk.X)
-
         sequence_options_frame = ttk.LabelFrame(left_frame, text="F2 동작 설정", padding=10)
         sequence_options_frame.pack(fill=tk.X, pady=(0, 10), anchor='n')
 
@@ -147,13 +182,6 @@ class AutomationApp:
         self.express_amount_entry.grid(row=1, column=1, sticky="ew", padx=5)
         amount_frame.columnconfigure(1, weight=1)
 
-        action_button_frame = ttk.Frame(delivery_frame)
-        action_button_frame.pack(fill=tk.X, pady=(10, 0))
-        run_button = ttk.Button(action_button_frame, text="배송 시작 (F1)", command=self._run_delivery)
-        run_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
-        debug_button = ttk.Button(action_button_frame, text="오버레이 보기", command=self._run_overlay_debug)
-        debug_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(5, 0))
-
         quick_copy_frame = ttk.LabelFrame(left_frame, text="빠른 응답 복사", padding=10)
         quick_copy_frame.pack(fill=tk.X, pady=(10, 0), anchor='n')
         response1 = "일반/특배 어떻게 보내드릴까요?"
@@ -181,6 +209,9 @@ class AutomationApp:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        debug_button = ttk.Button(right_frame, text="오버레이 보기", command=self._run_overlay_debug)
+        debug_button.pack(fill=tk.X, pady=(10, 0))
 
         self._refresh_whisper_list()
 
@@ -331,7 +362,7 @@ class AutomationApp:
         """귓속말 목록을 닉네임만 표시하도록 간소화합니다."""
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        latest_whispers = self.firestore_service.get_latest_unique_nicknames(count=15)
+        latest_whispers = self.firestore_service.get_latest_unique_nicknames(count=10)
         if not latest_whispers:
             ttk.Label(self.scrollable_frame, text="표시할 귓속말이 없습니다.").pack(pady=10)
             return
@@ -358,6 +389,35 @@ class AutomationApp:
         print(f"🖋️ 수신인에 '{nickname}'이(가) 입력되었습니다.")
 
     def _run_delivery(self):
+        """배송 작업을 수행하는 일련의 과정을 자동화합니다."""
+        # --- F1 실행 조건 검사 ---
+        print("F1 조건 확인: post.png와 inven.png를 찾습니다...")
+        post_loc = screen_utils.find_image_on_screen(POST_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
+        inven_loc = screen_utils.find_image_on_screen(INVEN_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
+
+        if not post_loc or not inven_loc:
+            print("오류: 'post.png' 또는 'inven.png'를 찾을 수 없어 F1 동작을 중단합니다.")
+            messagebox.showwarning("이미지 없음", "'post.png' 또는 'inven.png'를 화면에서 찾을 수 없습니다.")
+            return
+        print(f"두 이미지 모두 찾았습니다: post={post_loc}, inven={inven_loc}")
+
+        x_diff = abs(post_loc.left - inven_loc.left)
+        print(f"좌표 X 차이: {x_diff}")
+
+        if x_diff < 845:
+            print(f"좌표 X 차이({x_diff})가 845 미만이므로 인벤토리 위치를 조정합니다.")
+
+            h_margin = inven_loc.width * 0.2
+            v_margin = inven_loc.height * 0.2
+
+            click_x = random.randint(int(inven_loc.left + h_margin), int(inven_loc.left + inven_loc.width - h_margin))
+            click_y = random.randint(int(inven_loc.top + v_margin), int(inven_loc.top + inven_loc.height - v_margin))
+
+            pyautogui.moveTo(click_x, click_y, duration=0.2)
+            pyautogui.dragRel(150, 0, duration=0.5)
+            print(f"인벤토리 드래그 완료: ({click_x}, {click_y}) -> (+150, 0)")
+            time.sleep(0.3)
+
         if not activate_maple_window(): return
         delivery_type = self.delivery_type_var.get()
         receiver_name = self.receiver_var.get()
@@ -368,9 +428,17 @@ class AutomationApp:
         if not amount.isdigit():
             messagebox.showwarning("입력 오류", "금액은 숫자만 입력 가능합니다.")
             return
+
         try:
-            send_action(delivery_type, receiver_name, amount)
-            print(f"정보: 배송 작업 완료! 유형: {delivery_type}, 수신인: {receiver_name}, 금액: {amount}")
+            # [수정] send_action의 결과(True/False)를 받아 후속 조치 결정
+            success = send_action(delivery_type, receiver_name, amount)
+            if success:
+                print(f"정보: 배송 작업 완료! 유형: {delivery_type}, 수신인: {receiver_name}, 금액: {amount}")
+            else:
+                # 재고 부족 또는 기타 오류로 배송 실패 시 F2 동작 실행
+                print("배송 실패(재고 부족). F2(상점 열기) 동작을 실행합니다.")
+                messagebox.showinfo("재고 부족", "인벤토리에서 아이템을 모두 찾을 수 없습니다. 상점을 엽니다.")
+                open_shop()
         except Exception as e:
             print(f"오류: 자동화 중 오류 발생: {e}")
 

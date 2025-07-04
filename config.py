@@ -16,7 +16,7 @@ class GuiConfig:
     """GUI 애플리케이션 창의 설정을 관리합니다."""
     title: str = "자동화 시스템 v2.5"
     initial_width: int = 500
-    initial_height: int = 600
+    initial_height: int = 450
     # 화면 좌상단으로부터의 X, Y 좌표 (픽셀 단위)
     initial_pos_x: int = 0
     initial_pos_y: int = 770
@@ -68,7 +68,7 @@ class FirestoreConfig:
 @dataclass(frozen=True)
 class SnifferConfig:
     interface: str = "이더넷"
-    display_filter: str = 'tcp and data contains 04:00:30:00:00:00 and not data contains "Item" and data contains "-"'
+    display_filter: str = 'tcp and data contains 04:00:30:00:00:00'# and not data contains "Item" and data contains "-"'
 
 # [수정] WhisperParserConfig 클래스 정의 변경
 @dataclass(frozen=True)
