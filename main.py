@@ -70,7 +70,7 @@ class AutomationApp:
         app_logger.info("Initializing AutomationApp UI...")
 
         self.is_f5_loop_running = False
-        self.automation_running = False  # F1, F2 등 장기 작업 실행 여부 플래그
+        self.automation_running = False
 
         self.root.title(GUI_CONFIG.title)
         geometry_string = f"{GUI_CONFIG.initial_width}x{GUI_CONFIG.initial_height}+{GUI_CONFIG.initial_pos_x}+{GUI_CONFIG.initial_pos_y}"
@@ -195,8 +195,10 @@ class AutomationApp:
 
     def _toggle_f5_loop(self):
         if self.is_f5_loop_running:
+            print("\n[단축키 F12] 아이템 받기 루프 중단 신호를 보냅니다...")
             self.is_f5_loop_running = False
         else:
+            print("\n[단축키 F12] 아이템 받기 루프를 시작합니다 (최대 100회)...")
             self.is_f5_loop_running = True
             threading.Thread(target=self._run_receive_sequence, daemon=True).start()
 
@@ -206,21 +208,67 @@ class AutomationApp:
             return
         try:
             for i in range(100):
-                if not self.is_f5_loop_running: break
+                if not self.is_f5_loop_running:
+                    print("사용자 요청에 의해 아이템 받기 루프를 중단했습니다.")
+                    break
+                print(f"\n--- 아이템 받기 시작 ({i + 1}/100) ---")
+
+                payment_location = None
+                search_start_time = time.time()
                 post_base_location = screen_utils.find_image_on_screen(POST_CONFIG.base_image_path, GLOBAL_CONFIDENCE)
-                if not post_base_location: break
-                search_region = (post_base_location.left + 152, post_base_location.top + 149, 129, 281)
-                payment_location = screen_utils.find_image_in_region(PAYMENT_IMAGE_PATH, search_region,
-                                                                     GLOBAL_CONFIDENCE, timeout=5)
-                if not payment_location: break
-                click_randomly_in_cell(payment_location.left, payment_location.top, payment_location.width,
-                                       payment_location.height)
+                if not post_base_location:
+                    print("오류: 우편 창을 찾을 수 없어 루프를 중단합니다.")
+                    break
+
+                search_region = (
+                    post_base_location.left + 152, post_base_location.top + 149,
+                    281 - 152, 430 - 149
+                )
+
+                print(f"'{PAYMENT_IMAGE_PATH.name}' 이미지를 탐색합니다...")
+                while time.time() - search_start_time < 5:
+                    if not self.is_f5_loop_running: break
+                    payment_location = screen_utils.find_image_in_region(PAYMENT_IMAGE_PATH, search_region,
+                                                                         GLOBAL_CONFIDENCE)
+                    if payment_location:
+                        print(f"'{PAYMENT_IMAGE_PATH.name}' 이미지 발견.")
+                        break
+                    time.sleep(0.2)
+
+                if not self.is_f5_loop_running: break
+                if not payment_location:
+                    print("시간 초과: 5초 내에 다음 받을 아이템을 찾지 못해 루프를 종료합니다.")
+                    break
+
+                click_randomly_in_cell(
+                    payment_location.left, payment_location.top,
+                    payment_location.width, payment_location.height
+                )
                 time.sleep(0.1)
                 click_receive_button()
-                if screen_utils.find_image_on_screen(RECEIPT_IMAGE_PATH, confidence=GLOBAL_CONFIDENCE, timeout=5):
+
+                receipt_found = False
+                receipt_start_time = time.time()
+                print(f"'{RECEIPT_IMAGE_PATH.name}' 이미지를 탐색합니다...")
+                while time.time() - receipt_start_time < 5:
+                    if not self.is_f5_loop_running: break
+                    if screen_utils.find_image_on_screen(RECEIPT_IMAGE_PATH, confidence=GLOBAL_CONFIDENCE):
+                        print(f"'{RECEIPT_IMAGE_PATH.name}' 이미지 발견.")
+                        receipt_found = True
+                        break
+                    time.sleep(0.2)
+
+                if not self.is_f5_loop_running: break
+                if receipt_found:
                     pyautogui.press('enter')
                     time.sleep(1.5)
+                else:
+                    print(f"경고: 5초 내에 '{RECEIPT_IMAGE_PATH.name}' 이미지를 찾지 못했습니다.")
+            else:
+                print("\n--- 아이템 받기 100회 루프가 모두 완료되었습니다. ---")
+
         finally:
+            print("아이템 받기 작업을 종료합니다.")
             self.is_f5_loop_running = False
 
     def _setup_window_preset_f5(self):
@@ -229,7 +277,6 @@ class AutomationApp:
             resize_window(1366, 768)
 
     def _handle_hotkey(self, key):
-        # [수정] 자동화된 키 입력을 무시하는 플래그 확인
         if shared_state.ignore_hotkeys:
             return
 
@@ -357,8 +404,9 @@ class AutomationApp:
                 print(f"\n--- {i + 1}/{num_sets} 세트 발송 중 ---")
                 success = send_action(delivery_type, receiver_name, amount)
                 if not success:
-                    print("배송 실패(재고 부족 또는 오류 발생). F2(상점 열기) 동작을 실행하고 모든 발송을 중단합니다.")
-                    open_shop()
+                    if not shared_state.stop_action:
+                        print("배송 실패(재고 부족 또는 오류 발생). F2(상점 열기) 동작을 실행하고 모든 발송을 중단합니다.")
+                        open_shop()
                     return
                 if i < num_sets - 1:
                     time.sleep(1.5)
