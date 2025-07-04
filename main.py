@@ -436,8 +436,7 @@ class AutomationApp:
                 print(f"정보: 배송 작업 완료! 유형: {delivery_type}, 수신인: {receiver_name}, 금액: {amount}")
             else:
                 # 재고 부족 또는 기타 오류로 배송 실패 시 F2 동작 실행
-                print("배송 실패(재고 부족). F2(상점 열기) 동작을 실행합니다.")
-                messagebox.showinfo("재고 부족", "인벤토리에서 아이템을 모두 찾을 수 없습니다. 상점을 엽니다.")
+                print("배송 실패(재고 부족). 상점을 엽니다.")
                 open_shop()
         except Exception as e:
             print(f"오류: 자동화 중 오류 발생: {e}")
