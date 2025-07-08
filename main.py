@@ -409,7 +409,7 @@ class AutomationApp:
                         open_shop()
                     return
                 if i < num_sets - 1:
-                    time.sleep(1.5)
+                    time.sleep(0.5)
 
             if not shared_state.stop_action:
                 print(f"\n--- 총 {num_sets}세트 발송 작업이 모두 완료되었습니다. ---")

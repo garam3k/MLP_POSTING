@@ -137,7 +137,7 @@ def find_item_by_scrolling(item_image_path: Path) -> bool:
             pyautogui.scroll(-100)  # 아래로 스크롤
             time.sleep(0.05)
 
-        time.sleep(0.2)  # 스크롤 후 UI가 안정될 때까지 대기
+        time.sleep(0.05)  # 스크롤 후 UI가 안정될 때까지 대기
 
     print("경고: 최대 스크롤 시도 횟수에 도달했습니다.")
     return False
